@@ -1,20 +1,97 @@
-from flask import Flask, request, jsonify
-import urllib.parse
-import requests
 import os
+import sqlite3
+import urllib.parse
+from datetime import datetime, timedelta
+from flask import Flask, request, jsonify
+import requests
+import gspread
+from apscheduler.schedulers.background import BackgroundScheduler
 
 app = Flask(__name__)
 
 # ==========================================
-# CREDENCIALES
+# CONFIGURACIÓN Y CREDENCIALES
 # ==========================================
 TOKEN_DE_VERIFICACION = "madera_tools_secreto_2026"
-CLOUD_API_TOKEN = "TU_TOKEN_AQUI" # Reemplazar con el token real
-PHONE_NUMBER_ID = "TU_ID_TELEFONO_AQUI" # Reemplazar con el ID real
+CLOUD_API_TOKEN = "EAAUkLctR4q0BQ8mcvr7YtqEacloCMCDHq1AY8VE0gc0ZBIIZBboTSCSEIEOQQKbNtfD7i0HwqiJvnd9FZCdH27rlBVsOXer1Qmlx3N5GAMhO6FmRNmYwOuxCKcJAgqo9Xy8IwtiQcZCFcuJ2fIMQnO7mPvBjEYrAgCDs7eMyn1lZAT7aDaJ8SKG5I1cp7yAZDZD" # Reemplazar con el token real
+PHONE_NUMBER_ID = "1041050652417644" # Reemplazar con el ID real
 
+# Ruta al archivo JSON que subiremos a Render a través de "Secret Files"
+RUTA_CREDENCIALES = "/etc/secrets/credenciales.json" 
+NOMBRE_HOJA = "Base de datos wt"
+
+# ==========================================
+# BASE DE DATOS LOCAL (Para la memoria de 48hs)
+# ==========================================
+def init_db():
+    conn = sqlite3.connect('memoria_mensajes.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS mensajes 
+                 (id TEXT PRIMARY KEY, telefono TEXT, estado TEXT, fecha TIMESTAMP)''')
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# ==========================================
+# CONEXIÓN A GOOGLE SHEETS Y BLOQUEO
+# ==========================================
+def bloquear_numero_en_sheets(telefono):
+    try:
+        # 1. Nos conectamos usando la llave del robot
+        gc = gspread.service_account(filename=RUTA_CREDENCIALES)
+        sh = gc.open(NOMBRE_HOJA)
+        
+        # 2. Buscamos en todas las pestañas de tu Excel
+        for ws in sh.worksheets():
+            try:
+                # Buscamos la celda exacta que tiene este teléfono
+                celda = ws.find(telefono)
+                if celda:
+                    nuevo_valor = f"0000{telefono}"
+                    ws.update_cell(celda.row, celda.col, nuevo_valor)
+                    print(f"🚫 NÚMERO BLOQUEADO EN SHEETS: {telefono} (Pestaña: {ws.title})")
+                    return True
+            except gspread.exceptions.CellNotFound:
+                continue # No lo encontró en esta pestaña, sigue buscando
+        print(f"⚠️ No se encontró el teléfono {telefono} en la planilla para bloquearlo.")
+    except Exception as e:
+        print(f"❌ Error conectando a Sheets: {e}")
+
+# ==========================================
+# LÓGICA DEL TEMPORIZADOR (48 HORAS)
+# ==========================================
+def revisar_mensajes_vencidos():
+    print("🔍 Revisando mensajes de hace 48 horas...")
+    conn = sqlite3.connect('memoria_mensajes.db')
+    c = conn.cursor()
+    
+    hace_48_horas = datetime.now() - timedelta(hours=48)
+    
+    # Buscamos los que siguen en "sent" y ya pasaron 48hs
+    c.execute("SELECT id, telefono FROM mensajes WHERE estado='sent' AND fecha < ?", (hace_48_horas,))
+    vencidos = c.fetchall()
+    
+    for msg_id, telefono in vencidos:
+        print(f"⏰ TIEMPO AGOTADO: El número {telefono} nunca recibió el mensaje. Bloqueando...")
+        bloquear_numero_en_sheets(telefono)
+        # Lo borramos de la memoria
+        c.execute("DELETE FROM mensajes WHERE id=?", (msg_id,))
+        
+    conn.commit()
+    conn.close()
+
+# Iniciamos el reloj que revisa silenciosamente cada 1 hora
+scheduler = BackgroundScheduler()
+scheduler.add_job(func=revisar_mensajes_vencidos, trigger="interval", hours=1)
+scheduler.start()
+
+# ==========================================
+# RUTAS DEL WEBHOOK
+# ==========================================
 @app.route('/', methods=['GET'])
 def inicio():
-    return "🚀 El Webhook de WoodTools está funcionando perfectamente 🚀", 200
+    return "🚀 El Webhook de WoodTools + CRM Automático está funcionando 🚀", 200
 
 @app.route('/webhook', methods=['GET'])
 def verificar_webhook():
@@ -38,7 +115,7 @@ def recibir_notificaciones():
         try:
             cambios = cuerpo['entry'][0]['changes'][0]['value']
             
-            # 1. SI RECIBIMOS UN MENSAJE DE TEXTO (El cliente nos respondió)
+            # 1. SI RECIBIMOS UN MENSAJE DE TEXTO (Respuestas / Clics en el link)
             if 'messages' in cambios:
                 mensaje_entrante = cambios['messages'][0]
                 telefono_cliente = mensaje_entrante['from']
@@ -46,11 +123,34 @@ def recibir_notificaciones():
                 print(f"📩 NUEVO MENSAJE de {telefono_cliente}. Enviando auto-respuesta...")
                 enviar_respuesta_automatica(telefono_cliente)
                 
-            # 2. SI RECIBIMOS UN CAMBIO DE ESTADO (Entregado, Leído, etc.)
+            # 2. SI RECIBIMOS UN CAMBIO DE ESTADO (Sent, Delivered, Read, Failed)
             elif 'statuses' in cambios:
                 estado = cambios['statuses'][0]['status'] 
                 telefono = cambios['statuses'][0]['recipient_id']
-                print(f"✅ ESTADO: El teléfono {telefono} está en estado: {estado.upper()}")
+                msg_id = cambios['statuses'][0]['id']
+                
+                print(f"✅ ESTADO: {telefono} -> {estado.upper()}")
+                
+                conn = sqlite3.connect('memoria_mensajes.db')
+                c = conn.cursor()
+                
+                if estado == 'sent':
+                    # Lo anotamos en el cuaderno con la hora actual
+                    c.execute("INSERT OR REPLACE INTO mensajes (id, telefono, estado, fecha) VALUES (?, ?, ?, ?)", 
+                              (msg_id, telefono, estado, datetime.now()))
+                
+                elif estado in ['delivered', 'read']:
+                    # ¡Llegó bien! Lo borramos de la lista de peligro
+                    c.execute("DELETE FROM mensajes WHERE id=?", (msg_id,))
+                    
+                elif estado == 'failed':
+                    # ¡Fallo instantáneo! (Sin WhatsApp) -> Bloquear ya mismo
+                    print(f"💀 FALLO INMEDIATO: El número {telefono} rebotó. Bloqueando...")
+                    bloquear_numero_en_sheets(telefono)
+                    c.execute("DELETE FROM mensajes WHERE id=?", (msg_id,))
+                    
+                conn.commit()
+                conn.close()
                 
         except Exception as e:
             # Si Meta manda un formato raro, lo ignoramos para que no colapse
