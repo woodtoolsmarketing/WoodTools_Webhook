@@ -20,24 +20,26 @@ RUTA_CREDENCIALES = "/etc/secrets/credenciales.json"
 NOMBRE_HOJA = "Base de datos wt"
 
 # ==========================================
+# MODO RAYOS X (Para forzar a Render a mostrar los logs en vivo)
+# ==========================================
+@app.before_request
+def log_entradas():
+    print(f"👀 [{datetime.now().strftime('%H:%M:%S')}] META TOCÓ LA PUERTA: {request.method} {request.path}", flush=True)
+
+# ==========================================
 # BASE DE DATOS LOCAL (Memoria y Métricas)
 # ==========================================
 def init_db():
     conn = sqlite3.connect('memoria_mensajes.db')
     c = conn.cursor()
-    # Tabla para bloqueos de 48hs
-    c.execute('''CREATE TABLE IF NOT EXISTS mensajes 
-                 (id TEXT PRIMARY KEY, telefono TEXT, estado TEXT, fecha TIMESTAMP)''')
-    # NUEVA TABLA PARA MÉTRICAS GLOBALES
-    c.execute('''CREATE TABLE IF NOT EXISTS metricas_diarias
-                 (fecha TEXT PRIMARY KEY, enviados INTEGER, entregados INTEGER, leidos INTEGER, respondidos INTEGER)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS mensajes (id TEXT PRIMARY KEY, telefono TEXT, estado TEXT, fecha TIMESTAMP)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS metricas_diarias (fecha TEXT PRIMARY KEY, enviados INTEGER, entregados INTEGER, leidos INTEGER, respondidos INTEGER)''')
     conn.commit()
     conn.close()
 
 init_db()
 
 def registrar_metrica(evento):
-    """Suma +1 al evento del día (enviados, entregados, leidos, respondidos)"""
     try:
         fecha_hoy = datetime.now().strftime('%Y-%m-%d')
         conn = sqlite3.connect('memoria_mensajes.db')
@@ -51,11 +53,8 @@ def registrar_metrica(evento):
         
         conn.commit(); conn.close()
     except Exception as e:
-        print(f"Error guardando métrica: {e}")
+        print(f"Error guardando métrica: {e}", flush=True)
 
-# ==========================================
-# CONEXIÓN A GOOGLE SHEETS Y BLOQUEO
-# ==========================================
 def bloquear_numero_en_sheets(telefono):
     try:
         gc = gspread.service_account(filename=RUTA_CREDENCIALES)
@@ -65,16 +64,13 @@ def bloquear_numero_en_sheets(telefono):
                 celda = ws.find(telefono)
                 if celda:
                     ws.update_cell(celda.row, celda.col, f"0000{telefono}")
-                    print(f"🚫 BLOQUEADO EN SHEETS: {telefono} (Pestaña: {ws.title})")
+                    print(f"🚫 BLOQUEADO EN SHEETS: {telefono} (Pestaña: {ws.title})", flush=True)
                     return True
             except gspread.exceptions.CellNotFound: continue
-    except Exception as e: print(f"❌ Error conectando a Sheets: {e}")
+    except Exception as e: print(f"❌ Error conectando a Sheets: {e}", flush=True)
 
-# ==========================================
-# LÓGICA DEL TEMPORIZADOR (48 HORAS)
-# ==========================================
 def revisar_mensajes_vencidos():
-    print("🔍 Revisando mensajes de hace 48 horas...")
+    print("🔍 Revisando mensajes de hace 48 horas...", flush=True)
     conn = sqlite3.connect('memoria_mensajes.db')
     c = conn.cursor()
     hace_48_horas = datetime.now() - timedelta(hours=48)
@@ -83,7 +79,7 @@ def revisar_mensajes_vencidos():
     vencidos = c.fetchall()
     
     for msg_id, telefono in vencidos:
-        print(f"⏰ TIEMPO AGOTADO: El número {telefono} nunca recibió el mensaje. Bloqueando...")
+        print(f"⏰ TIEMPO AGOTADO: El número {telefono} nunca recibió el mensaje. Bloqueando...", flush=True)
         bloquear_numero_en_sheets(telefono)
         c.execute("DELETE FROM mensajes WHERE id=?", (msg_id,))
         
@@ -94,13 +90,12 @@ scheduler.add_job(func=revisar_mensajes_vencidos, trigger="interval", hours=1)
 scheduler.start()
 
 # ==========================================
-# RUTAS DEL WEBHOOK Y MÉTRICAS
+# RUTAS DEL WEBHOOK
 # ==========================================
-@app.route('/', methods=['GET'])
+@app.route('/', methods=['GET', 'POST']) # Agregado POST por las dudas que Meta le pifie a la URL
 def inicio():
     return "🚀 El Webhook de WoodTools + CRM Automático está funcionando 🚀", 200
 
-# ---> NUEVA RUTA PARA QUE TU PROGRAMA DE ESCRITORIO LEA LAS ESTADÍSTICAS <---
 @app.route('/metricas', methods=['GET'])
 def obtener_metricas():
     try:
@@ -109,8 +104,6 @@ def obtener_metricas():
         c.execute("SELECT fecha, enviados, entregados, leidos, respondidos FROM metricas_diarias")
         filas = c.fetchall()
         conn.close()
-        
-        # Devolvemos la info en formato JSON
         data = {row[0]: {"enviados": row[1], "entregados": row[2], "leidos": row[3], "respondidos": row[4]} for row in filas}
         return jsonify(data), 200
     except Exception as e:
@@ -121,7 +114,9 @@ def verificar_webhook():
     mode = request.args.get('hub.mode')
     token = request.args.get('hub.verify_token')
     if mode and token:
-        if mode == 'subscribe' and token == TOKEN_DE_VERIFICACION: return request.args.get('hub.challenge'), 200
+        if mode == 'subscribe' and token == TOKEN_DE_VERIFICACION: 
+            print("✅ Webhook verificado por Meta correctamente.", flush=True)
+            return request.args.get('hub.challenge'), 200
         else: return 'Token incorrecto', 403
     return 'Faltan parámetros', 400
 
@@ -132,42 +127,38 @@ def recibir_notificaciones():
         try:
             cambios = cuerpo['entry'][0]['changes'][0]['value']
             
-            # 1. SI RECIBIMOS UN MENSAJE DIRECTO AL BOT
             if 'messages' in cambios:
                 mensaje_entrante = cambios['messages'][0]
                 telefono_cliente = mensaje_entrante['from']
-                print(f"📩 NUEVO MENSAJE de {telefono_cliente}. Enviando auto-respuesta...")
+                print(f"📩 NUEVO MENSAJE de {telefono_cliente}. Preparando auto-respuesta...", flush=True)
                 
-                # Registramos que alguien interactuó con el Bot directamente
                 registrar_metrica('responded') 
                 enviar_respuesta_automatica(telefono_cliente)
                 
-            # 2. CAMBIOS DE ESTADO (Sent, Delivered, Read, Failed)
             elif 'statuses' in cambios:
                 estado = cambios['statuses'][0]['status'] 
                 telefono = cambios['statuses'][0]['recipient_id']
                 msg_id = cambios['statuses'][0]['id']
                 
-                print(f"✅ ESTADO: {telefono} -> {estado.upper()}")
-                
-                # ANOTAMOS LA MÉTRICA PARA EL PANEL DE ESTADÍSTICAS
+                print(f"📊 ESTADO ACTUALIZADO: {telefono} -> {estado.upper()}", flush=True)
                 registrar_metrica(estado)
                 
-                # LÓGICA DE MEMORIA PARA BLOQUEO DE 48HS
                 conn = sqlite3.connect('memoria_mensajes.db')
                 c = conn.cursor()
                 if estado == 'sent':
-                    c.execute("INSERT OR REPLACE INTO mensajes (id, telefono, estado, fecha) VALUES (?, ?, ?, ?)", 
-                              (msg_id, telefono, estado, datetime.now()))
+                    c.execute("INSERT OR REPLACE INTO mensajes (id, telefono, estado, fecha) VALUES (?, ?, ?, ?)", (msg_id, telefono, estado, datetime.now()))
                 elif estado in ['delivered', 'read']:
                     c.execute("DELETE FROM mensajes WHERE id=?", (msg_id,))
                 elif estado == 'failed':
-                    print(f"💀 FALLO INMEDIATO: El número {telefono} rebotó. Bloqueando...")
+                    print(f"💀 FALLO INMEDIATO: El número {telefono} rebotó. Bloqueando...", flush=True)
                     bloquear_numero_en_sheets(telefono)
                     c.execute("DELETE FROM mensajes WHERE id=?", (msg_id,))
                     
                 conn.commit(); conn.close()
-        except Exception: pass
+        except Exception as e: 
+            print(f"⚠️ Estructura diferente de Meta, ignorando... Error: {e}", flush=True)
+            pass
+            
         return jsonify({"status": "ok"}), 200
     return "Sin datos", 400
 
@@ -180,16 +171,18 @@ def enviar_respuesta_automatica(telefono_destino):
     link_wa = f"https://wa.me/{telefono_asesor}?text={urllib.parse.quote(texto_prearmado)}"
     mensaje_texto = f"Este medio es únicamente para enviarte la notificación. Para hablar con un asesor y obtener mayor información te pido que entres al link 👉 {link_wa}"
     
-    url = f"https://graph.facebook.com/v17.0/{PHONE_NUMBER_ID}/messages"
+    url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages" # Actualizado a v18.0
     headers = {"Authorization": f"Bearer {CLOUD_API_TOKEN}", "Content-Type": "application/json"}
     data = {"messaging_product": "whatsapp", "to": telefono_destino, "type": "text", "text": {"body": mensaje_texto}}
     
     try: 
         res = requests.post(url, headers=headers, json=data)
-        # Log detallado para ver si Meta bloquea el mensaje
-        print(f"➡️ Auto-respuesta enviada: [{res.status_code}] {res.text}")
+        if res.status_code == 200:
+            print(f"✅ Auto-respuesta enviada con éxito a {telefono_destino}", flush=True)
+        else:
+            print(f"❌ Meta rechazó la auto-respuesta. Código: {res.status_code} Error: {res.text}", flush=True)
     except Exception as e: 
-        print(f"❌ Error enviando auto-respuesta: {e}")
+        print(f"❌ Error crítico de servidor enviando auto-respuesta: {e}", flush=True)
 
 if __name__ == '__main__':
     puerto = int(os.environ.get('PORT', 5000))
