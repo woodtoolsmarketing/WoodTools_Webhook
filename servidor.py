@@ -25,7 +25,6 @@ genai.configure(api_key=GEMINI_API_KEY)
 RUTA_CREDENCIALES = "/etc/secrets/credenciales.json" 
 NOMBRE_HOJA = "Base de datos wt"
 
-# DICCIONARIO INVERSO PARA SABER QUIÉN ES EL VENDEDOR SEGÚN SU NÚMERO
 VENDEDORES_POR_NUMERO = {
     "5491145394279": "Valentín",
     "5491165630406": "Carlos",
@@ -45,7 +44,8 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS mensajes (id TEXT PRIMARY KEY, telefono TEXT, estado TEXT, fecha TIMESTAMP)''')
     c.execute('''CREATE TABLE IF NOT EXISTS metricas_diarias (fecha TEXT PRIMARY KEY, enviados INTEGER, entregados INTEGER, leidos INTEGER, respondidos INTEGER)''')
     c.execute('''CREATE TABLE IF NOT EXISTS chat_sesiones (telefono TEXT PRIMARY KEY, historial TEXT, ultima_interaccion TIMESTAMP, advertido INTEGER DEFAULT 0)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS asignaciones (telefono_cliente TEXT PRIMARY KEY, numero_vendedor TEXT)''')
+    # NUEVA TABLA V2: Ahora guarda el tipo de campaña y subtipo
+    c.execute('''CREATE TABLE IF NOT EXISTS asignaciones_v2 (telefono_cliente TEXT PRIMARY KEY, numero_vendedor TEXT, tipo_campana TEXT, subtipo TEXT)''')
     conn.commit()
     conn.close()
 
@@ -77,9 +77,6 @@ def bloquear_numero_en_sheets(telefono):
             except gspread.exceptions.CellNotFound: continue
     except Exception as e: print(f"❌ Error conectando a Sheets: {e}", flush=True)
 
-# ==========================================
-# TAREAS EN SEGUNDO PLANO (Cron)
-# ==========================================
 def revisar_rutinas_de_tiempo():
     conn = sqlite3.connect('memoria_mensajes.db')
     c = conn.cursor()
@@ -107,19 +104,38 @@ scheduler.add_job(func=revisar_rutinas_de_tiempo, trigger="interval", minutes=10
 scheduler.start()
 
 # ==========================================
-# CEREBRO IA: GENERADOR DE PROMPTS DINÁMICOS
+# CEREBRO IA: GENERADOR DE PROMPTS CON FRASES PREDEFINIDAS
 # ==========================================
 def obtener_prompt_personalizado(telefono_cliente):
     telefono_limpio = limpiar_numero(telefono_cliente)
     conn = sqlite3.connect('memoria_mensajes.db')
     c = conn.cursor()
-    c.execute("SELECT numero_vendedor FROM asignaciones WHERE telefono_cliente = ?", (telefono_limpio,))
+    c.execute("SELECT numero_vendedor, tipo_campana, subtipo FROM asignaciones_v2 WHERE telefono_cliente = ?", (telefono_limpio,))
     res = c.fetchone()
     conn.close()
 
     tel_vend = res[0] if res else "5491145394279"
+    tipo_camp = res[1] if res else "Promociones"
+    subtipo = res[2] if res else ""
     nombre_vend = VENDEDORES_POR_NUMERO.get(tel_vend, "un asesor")
     
+    # SELECCIÓN EXACTA DE PLANTILLAS
+    plantillas = {
+        "Promociones": "Hola, vengo por la promoción de [herramienta] para [material] y quisiera tener más información",
+        "Rescate (Te extrañamos)": "Hola, vengo por el anuncio que me enviaron y quería novedades sobre [herramienta] para [material]",
+        "Gira Vendedor": f"Hola, me comentaron que {nombre_vend} va a estar visitando mi zona dentro de poco. Quisiera poder arreglar para una visita",
+        "Personalizado": "Hola Vengo por el anuncio de [herramienta] para [material]",
+        "Recotización": "Hola, vengo del aviso de una recotización sobre [herramienta]"
+    }
+    
+    if tipo_camp == "Novedades":
+        if subtipo == "Ingresos":
+            frase_link = "Hola me comento que tuvieron un nuevo ingreso de [herramienta]"
+        else:
+            frase_link = "Hola, me comentaron que entró nuevo stock de [herramienta]"
+    else:
+        frase_link = plantillas.get(tipo_camp, plantillas["Promociones"])
+
     link_base = f"https://wa.me/{tel_vend}?text="
     
     return f"""
@@ -128,21 +144,24 @@ Habla en español argentino (usa 'vos', empático y servicial).
 Usa formato de WhatsApp (*negritas* y emojis), NUNCA uses markdown de asteriscos dobles (**).
 
 CONTEXTO:
-El cliente acaba de recibir un mensaje nuestro (con promociones, descuentos, novedades de stock o seguimiento) y nos está escribiendo para pedir información.
+El cliente recibió una campaña del tipo "{tipo_camp}" y está respondiendo.
 
 TUS REGLAS ESTRICTAS:
-1. Saluda al cliente cordialmente. ESTÁ PROHIBIDO USAR LA PALABRA "CAMPAÑA". Habla naturalmente.
-2. Tu ÚNICO objetivo es averiguar: a) Qué tipo de herramienta busca, y b) Qué material desea cortar.
+1. Saluda cordialmente.
+2. Tu objetivo es obtener la información necesaria para completar la siguiente frase: "{frase_link}".
+   - Si la frase tiene [herramienta] y [material], pregúntale ambas cosas al cliente sutilmente.
+   - Si la frase NO tiene corchetes (ej. Gira Vendedor), NO preguntes nada de herramientas ni materiales, solo despídete y pasa el link.
 3. NO respondas preguntas técnicas, NO des precios, NO des información de stock.
-4. El vendedor asignado a este cliente en particular es **{nombre_vend}**. NO le preguntes con quién quiere hablar.
-5. Una vez que tengas la herramienta y el material, interrumpe amablemente, dile que {nombre_vend} le pasará los valores y la información exacta, y DESPÍDETE ENVIANDO SU LINK DIRECTO.
+4. El vendedor asignado es **{nombre_vend}**.
+5. Una vez que tengas los datos para llenar los corchetes de la frase, interrumpe amablemente, dile que {nombre_vend} lo ayudará, y DESPÍDETE ENVIANDO EL LINK.
 
 FORMATO DEL LINK (MUY IMPORTANTE):
-El texto final del link DEBE incluir el motivo por el que escribe el cliente (por ejemplo: "vengo por los descuentos", "vengo por la promo", o "vengo por el nuevo ingreso").
-Arma el link detallando la herramienta y material exacto. Reemplaza los espacios por '%20'.
+DEBES usar EXACTAMENTE esta frase para el texto del link: "{frase_link}"
+Reemplaza los campos [herramienta] y [material] con lo que te dijo el cliente.
+Codifica los espacios con '%20'.
 El link EXACTO que debes usar como base es este: {link_base}
-Ejemplo de salida: "Perfecto, te paso directamente con {nombre_vend} para que te pase los precios y te asesore mejor: {link_base}Hola%20{nombre_vend},%20vengo%20por%20los%20descuentos%20en%20sierras%20para%20cortar%20melamina"
 """
+
 def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
     conn = sqlite3.connect('memoria_mensajes.db')
     c = conn.cursor()
@@ -155,7 +174,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
         prompt_dinamico = obtener_prompt_personalizado(telefono_cliente)
         historial = [
             {"role": "user", "parts": [prompt_dinamico]},
-            {"role": "model", "parts": ["Entendido. Soy el asistente. Saludaré amablemente sin usar la palabra 'campaña', preguntaré por herramienta y material, y derivaré al cliente usando un link que mencione su interés específico."]}
+            {"role": "model", "parts": ["Entendido. Soy el asistente. Haré las preguntas justas para rellenar los corchetes de la frase predefinida, y luego armaré el link exactamente con esa frase codificada."]}
         ]
         
     historial.append({"role": "user", "parts": [texto_entrante]})
@@ -190,18 +209,21 @@ def enviar_mensaje_whatsapp(telefono_destino, texto):
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (Vendedor Automático) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (Plantillas Fijas) 🚀", 200
 
 @app.route('/asignar_vendedor', methods=['POST'])
 def asignar_vendedor():
     data = request.json
     telefono_cliente = limpiar_numero(data.get('cliente', ''))
     numero_vendedor = limpiar_numero(data.get('vendedor_tel', ''))
+    tipo_campana = data.get('tipo_campana', 'Promociones')
+    subtipo = data.get('subtipo', '')
     
     if telefono_cliente and numero_vendedor:
         conn = sqlite3.connect('memoria_mensajes.db')
         c = conn.cursor()
-        c.execute("INSERT OR REPLACE INTO asignaciones (telefono_cliente, numero_vendedor) VALUES (?, ?)", (telefono_cliente, numero_vendedor))
+        c.execute("INSERT OR REPLACE INTO asignaciones_v2 (telefono_cliente, numero_vendedor, tipo_campana, subtipo) VALUES (?, ?, ?, ?)", 
+                  (telefono_cliente, numero_vendedor, tipo_campana, subtipo))
         conn.commit(); conn.close()
         return jsonify({"status": "asignado"}), 200
     return jsonify({"error": "faltan datos"}), 400
