@@ -18,7 +18,7 @@ TOKEN_DE_VERIFICACION = "madera_tools_secreto_2026"
 CLOUD_API_TOKEN = "EAAUkLctR4q0BQ8mcvr7YtqEacloCMCDHq1AY8VE0gc0ZBIIZBboTSCSEIEOQQKbNtfD7i0HwqiJvnd9FZCdH27rlBVsOXer1Qmlx3N5GAMhO6FmRNmYwOuxCKcJAgqo9Xy8IwtiQcZCFcuJ2fIMQnO7mPvBjEYrAgCDs7eMyn1lZAT7aDaJ8SKG5I1cp7yAZDZD"
 PHONE_NUMBER_ID = "1041050652417644"
 
-# 🔑 ¡AGREGÁ TU API KEY DE GEMINI ACÁ!
+# 🔑 ¡AGREGÁ TU API KEY DE GEMINI ACÁ! (Por seguridad quité la anterior)
 GEMINI_API_KEY = "AIzaSyAksvQQznQ0JWZd5ZqWmLVAagsmhvNcq8U"
 genai.configure(api_key=GEMINI_API_KEY)
 
@@ -171,7 +171,8 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
         
     except Exception as e:
         print(f"Error con Gemini: {e}")
-        enviar_mensaje_whatsapp(telefono_cliente, "Dame un segundito que estoy derivando tu consulta...")
+        # ACA ESTÁ EL TRUCO: Te manda el error directamente a WhatsApp
+        enviar_mensaje_whatsapp(telefono_cliente, f"🤖 ERROR TÉCNICO: {e}")
     finally:
         conn.close()
 
