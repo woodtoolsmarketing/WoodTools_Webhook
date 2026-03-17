@@ -18,7 +18,7 @@ TOKEN_DE_VERIFICACION = "madera_tools_secreto_2026"
 CLOUD_API_TOKEN = "EAAUkLctR4q0BQ8mcvr7YtqEacloCMCDHq1AY8VE0gc0ZBIIZBboTSCSEIEOQQKbNtfD7i0HwqiJvnd9FZCdH27rlBVsOXer1Qmlx3N5GAMhO6FmRNmYwOuxCKcJAgqo9Xy8IwtiQcZCFcuJ2fIMQnO7mPvBjEYrAgCDs7eMyn1lZAT7aDaJ8SKG5I1cp7yAZDZD"
 PHONE_NUMBER_ID = "1041050652417644"
 
-# 🔑 ¡AGREGÁ TU API KEY DE GEMINI ACÁ! (Por seguridad quité la anterior)
+# 🔑 ¡AGREGÁ TU API KEY DE GEMINI ACÁ!
 GEMINI_API_KEY = "AIzaSyA_-Vtj0xw65kuSFnG6a7FPsVWMwnKPosU"
 genai.configure(api_key=GEMINI_API_KEY)
 
@@ -33,6 +33,10 @@ VENDEDORES_POR_NUMERO = {
     "5491100000000": "Ariel" # REEMPLAZAR POR EL DE ARIEL
 }
 
+def limpiar_numero(num):
+    # Esto asegura que el número no tenga signos '+', espacios o caracteres raros
+    return ''.join(filter(str.isdigit, str(num)))
+
 # ==========================================
 # BASE DE DATOS LOCAL
 # ==========================================
@@ -42,7 +46,6 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS mensajes (id TEXT PRIMARY KEY, telefono TEXT, estado TEXT, fecha TIMESTAMP)''')
     c.execute('''CREATE TABLE IF NOT EXISTS metricas_diarias (fecha TEXT PRIMARY KEY, enviados INTEGER, entregados INTEGER, leidos INTEGER, respondidos INTEGER)''')
     c.execute('''CREATE TABLE IF NOT EXISTS chat_sesiones (telefono TEXT PRIMARY KEY, historial TEXT, ultima_interaccion TIMESTAMP, advertido INTEGER DEFAULT 0)''')
-    # NUEVA TABLA: Para recordar quién es el vendedor de cada cliente
     c.execute('''CREATE TABLE IF NOT EXISTS asignaciones (telefono_cliente TEXT PRIMARY KEY, numero_vendedor TEXT)''')
     conn.commit()
     conn.close()
@@ -108,34 +111,38 @@ scheduler.start()
 # CEREBRO IA: GENERADOR DE PROMPTS DINÁMICOS
 # ==========================================
 def obtener_prompt_personalizado(telefono_cliente):
+    telefono_limpio = limpiar_numero(telefono_cliente)
     conn = sqlite3.connect('memoria_mensajes.db')
     c = conn.cursor()
-    c.execute("SELECT numero_vendedor FROM asignaciones WHERE telefono_cliente = ?", (telefono_cliente,))
+    c.execute("SELECT numero_vendedor FROM asignaciones WHERE telefono_cliente = ?", (telefono_limpio,))
     res = c.fetchone()
     conn.close()
 
-    # Si encontramos el vendedor asignado, lo usamos. Si no, mandamos uno por defecto (ej: Valentín)
+    # Si no lo encuentra, asume Valentín (Fallback)
     tel_vend = res[0] if res else "5491145394279"
     nombre_vend = VENDEDORES_POR_NUMERO.get(tel_vend, "un asesor")
     
     link_base = f"https://wa.me/{tel_vend}?text="
     
     return f"""
-Eres un asistente virtual de recepción rápida para WoodTools. 
-Habla en español argentino (usa 'vos', pero de forma profesional y amable).
+Eres el asistente virtual de recepción de WoodTools. 
+Habla en español argentino (usa 'vos', empático y servicial).
 Usa formato de WhatsApp (*negritas* y emojis), NUNCA uses markdown de asteriscos dobles (**).
 
-REGLAS ESTRICTAS Y LIMITADAS:
-1. Tu ÚNICO y exclusivo objetivo es averiguar dos cosas del cliente: a) Qué tipo de herramienta busca, y b) Qué material desea cortar.
-2. NO respondas preguntas técnicas, NO des precios, NO des información de stock ni entres en conversaciones largas.
-3. El vendedor asignado a este cliente en particular es **{nombre_vend}**. NO preguntes con quién quiere hablar, porque ya lo sabemos.
-4. Si el cliente te hace CUALQUIER OTRA PREGUNTA (ej: "¿Cuánto cuesta?", "¿Hacen envíos?"), interrumpe amablemente, dile que {nombre_vend} lo ayudará con esa consulta y pasa directamente a la regla 5.
-5. Una vez que tengas el tipo de herramienta y el material, O cuando el cliente haga una pregunta fuera de libreto, DESPÍDETE Y ENVIALE EL LINK DIRECTO DE {nombre_vend.upper()}.
+CONTEXTO:
+El cliente acaba de recibir un mensaje de nuestra campaña publicitaria por WhatsApp (ya sea promoción, novedades o rescate) y está respondiendo para pedir información o aprovecharla.
+
+TUS REGLAS:
+1. Saluda al cliente mencionando la campaña: "¡Hola! Qué bueno que nos escribís por la campaña/promoción..."
+2. Tu ÚNICO objetivo es averiguar específicamente: a) Qué tipo de herramienta busca dentro de la promo, y b) Qué material desea cortar.
+3. NO respondas preguntas técnicas, NO des precios, NO des información de stock.
+4. El vendedor asignado a este cliente en particular es **{nombre_vend}**. NO le preguntes con quién quiere hablar.
+5. Una vez que tengas la herramienta y el material (O si el cliente te pide precios directo), interrumpe amablemente, dile que {nombre_vend} le pasará toda la info de la campaña y DESPÍDETE ENVIANDO SU LINK DIRECTO.
 
 FORMATO DEL LINK (MUY IMPORTANTE):
-Arma un link con el resumen de la información recolectada. Reemplaza los espacios por '%20'.
+Arma un link con el resumen. Reemplaza los espacios por '%20'.
 El link EXACTO que debes usar como base es este: {link_base}
-Ejemplo de salida: "Perfecto, te paso directamente con {nombre_vend} para que te cotice: {link_base}Hola%20{nombre_vend}%20busco%20sierras%20para%20cortar%20melamina"
+Ejemplo de salida: "Perfecto, te paso directamente con {nombre_vend} para que te pase los precios de la campaña: {link_base}Hola%20{nombre_vend}%20vengo%20por%20la%20campana%20y%20busco%20sierras%20para%20melamina"
 """
 
 def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
@@ -147,17 +154,15 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
     if resultado:
         historial = json.loads(resultado[0])
     else:
-        # Generamos el prompt dinámico con el vendedor que le toca a este cliente
         prompt_dinamico = obtener_prompt_personalizado(telefono_cliente)
         historial = [
             {"role": "user", "parts": [prompt_dinamico]},
-            {"role": "model", "parts": ["Entendido. Soy el asistente de recepción. Solo preguntaré por herramienta y material. Ante cualquier otra duda o al terminar, derivaré al cliente usando su link personalizado."]}
+            {"role": "model", "parts": ["Entendido. Soy el asistente. Saludaré mencionando la campaña, preguntaré por herramienta y material, y luego pasaré el link de su asesor asignado sin dar precios."]}
         ]
         
     historial.append({"role": "user", "parts": [texto_entrante]})
     
     try:
-        # ACA ESTÁ EL CAMBIO AL MODELO ACTUAL (GEMINI 2.5 FLASH)
         model = genai.GenerativeModel('gemini-2.5-flash')
         chat = model.start_chat(history=historial[:-1])
         respuesta = chat.send_message(texto_entrante)
@@ -172,7 +177,6 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
         
     except Exception as e:
         print(f"Error con Gemini: {e}")
-        # Mantenemos el aviso a WhatsApp por si llega a fallar otra cosa en el futuro
         enviar_mensaje_whatsapp(telefono_cliente, f"🤖 ERROR TÉCNICO: {e}")
     finally:
         conn.close()
@@ -190,12 +194,11 @@ def enviar_mensaje_whatsapp(telefono_destino, texto):
 def inicio():
     return "🚀 Webhook WoodTools + IA Gemini (Vendedor Automático) 🚀", 200
 
-# NUEVA RUTA: El "puente" para recibir avisos de la PC
 @app.route('/asignar_vendedor', methods=['POST'])
 def asignar_vendedor():
     data = request.json
-    telefono_cliente = data.get('cliente')
-    numero_vendedor = data.get('vendedor_tel')
+    telefono_cliente = limpiar_numero(data.get('cliente', ''))
+    numero_vendedor = limpiar_numero(data.get('vendedor_tel', ''))
     
     if telefono_cliente and numero_vendedor:
         conn = sqlite3.connect('memoria_mensajes.db')
@@ -223,7 +226,7 @@ def recibir_notificaciones():
             if 'messages' in cambios:
                 mensaje = cambios['messages'][0]
                 if mensaje['type'] == 'text': 
-                    telefono_cliente = mensaje['from']
+                    telefono_cliente = limpiar_numero(mensaje['from'])
                     texto_cliente = mensaje['text']['body']
                     
                     print(f"📩 MENSAJE de {telefono_cliente}: {texto_cliente}", flush=True)
@@ -232,7 +235,7 @@ def recibir_notificaciones():
                 
             elif 'statuses' in cambios:
                 estado = cambios['statuses'][0]['status'] 
-                telefono = cambios['statuses'][0]['recipient_id']
+                telefono = limpiar_numero(cambios['statuses'][0]['recipient_id'])
                 msg_id = cambios['statuses'][0]['id']
                 
                 registrar_metrica(estado)
