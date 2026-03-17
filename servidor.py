@@ -19,7 +19,7 @@ CLOUD_API_TOKEN = "EAAUkLctR4q0BQ8mcvr7YtqEacloCMCDHq1AY8VE0gc0ZBIIZBboTSCSEIEOQ
 PHONE_NUMBER_ID = "1041050652417644"
 
 # 🔑 ¡AGREGÁ TU API KEY DE GEMINI ACÁ! (Por seguridad quité la anterior)
-GEMINI_API_KEY = "PONER_TU_NUEVA_LLAVE_AQUI"
+GEMINI_API_KEY = "AIzaSyAksvQQznQ0JWZd5ZqWmLVAagsmhvNcq8U"
 genai.configure(api_key=GEMINI_API_KEY)
 
 RUTA_CREDENCIALES = "/etc/secrets/credenciales.json" 
