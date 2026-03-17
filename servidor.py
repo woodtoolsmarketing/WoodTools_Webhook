@@ -19,7 +19,7 @@ CLOUD_API_TOKEN = "EAAUkLctR4q0BQ8mcvr7YtqEacloCMCDHq1AY8VE0gc0ZBIIZBboTSCSEIEOQ
 PHONE_NUMBER_ID = "1041050652417644"
 
 # 🔑 ¡AGREGÁ TU API KEY DE GEMINI ACÁ! (Por seguridad quité la anterior)
-GEMINI_API_KEY = "AIzaSyAksvQQznQ0JWZd5ZqWmLVAagsmhvNcq8U"
+GEMINI_API_KEY = "PONER_TU_NUEVA_LLAVE_AQUI"
 genai.configure(api_key=GEMINI_API_KEY)
 
 RUTA_CREDENCIALES = "/etc/secrets/credenciales.json" 
@@ -157,7 +157,8 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
     historial.append({"role": "user", "parts": [texto_entrante]})
     
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # ACA ESTÁ EL CAMBIO MAGICO A GEMINI-PRO
+        model = genai.GenerativeModel('gemini-pro')
         chat = model.start_chat(history=historial[:-1])
         respuesta = chat.send_message(texto_entrante)
         texto_respuesta = respuesta.text
@@ -171,7 +172,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
         
     except Exception as e:
         print(f"Error con Gemini: {e}")
-        # ACA ESTÁ EL TRUCO: Te manda el error directamente a WhatsApp
+        # Mantenemos el aviso a WhatsApp por si llega a fallar otra cosa en el futuro
         enviar_mensaje_whatsapp(telefono_cliente, f"🤖 ERROR TÉCNICO: {e}")
     finally:
         conn.close()
