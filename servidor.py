@@ -40,7 +40,7 @@ def extraer_10_digitos(num):
     return solo_numeros[-10:] if len(solo_numeros) >= 10 else solo_numeros
 
 # ==========================================
-# BASE DE DATOS LOCAL (Render)
+# BASE DE DATOS LOCAL
 # ==========================================
 def init_db():
     conn = sqlite3.connect('memoria_mensajes.db')
@@ -123,6 +123,8 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
     subtipo = res[2] if res else ""
     nombre_vend = VENDEDORES_POR_NUMERO.get(tel_vend, "un asesor")
     
+    print(f"🔍 MEMORIA: El cliente {tel_10_digitos} fue asignado a {nombre_vend} para la campaña {tipo_camp}", flush=True)
+
     plantillas = {
         "Promociones": "Hola, vengo por la promoción de [herramienta] para [material] y quisiera tener más información",
         "Rescate (Te extrañamos)": "Hola, vengo por el anuncio que me enviaron y quería novedades sobre [herramienta] para [material]",
@@ -171,14 +173,10 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
     c.execute("SELECT historial FROM chat_sesiones WHERE telefono = ?", (telefono_cliente,))
     resultado = c.fetchone()
     
-    # Buscamos SIEMPRE las instrucciones de la campaña actual
     prompt_dinamico = obtener_prompt_personalizado(telefono_cliente)
     
     if resultado:
         historial = json.loads(resultado[0])
-        # ESTA ES LA MAGIA ANTI-MEMORIA VIEJA: 
-        # Forzamos a la IA a que se actualice con el vendedor de la nueva campaña, 
-        # incluso si ya venían charlando de otra cosa antes.
         if len(historial) > 0 and historial[0]["role"] == "user":
             historial[0]["parts"] = [prompt_dinamico]
     else:
@@ -219,12 +217,13 @@ def enviar_mensaje_whatsapp(telefono_destino, texto):
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (Solución Memoria) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (Anti-Memoria Vieja) 🚀", 200
 
 @app.route('/asignar_vendedor', methods=['POST'])
 def asignar_vendedor():
     data = request.json
-    telefono_cliente_10 = extraer_10_digitos(data.get('cliente', ''))
+    cliente_raw = data.get('cliente', '')
+    telefono_cliente_10 = extraer_10_digitos(cliente_raw)
     numero_vendedor = limpiar_numero(data.get('vendedor_tel', ''))
     tipo_campana = data.get('tipo_campana', 'Promociones')
     subtipo = data.get('subtipo', '')
@@ -232,9 +231,17 @@ def asignar_vendedor():
     if telefono_cliente_10 and numero_vendedor:
         conn = sqlite3.connect('memoria_mensajes.db')
         c = conn.cursor()
+        
+        # 1. Guardamos la nueva asignación
         c.execute("INSERT OR REPLACE INTO asignaciones_v2 (telefono_cliente, numero_vendedor, tipo_campana, subtipo) VALUES (?, ?, ?, ?)", 
                   (telefono_cliente_10, numero_vendedor, tipo_campana, subtipo))
+        
+        # 2. EL BORRADO DE MEMORIA (MAGIA)
+        # Forzamos a la base de datos a olvidar cualquier charla previa con este cliente
+        c.execute("DELETE FROM chat_sesiones WHERE telefono = ? OR telefono LIKE ?", (cliente_raw, f"%{telefono_cliente_10}"))
+        
         conn.commit(); conn.close()
+        print(f"✅ PC AVISÓ A RENDER: Disparo a {telefono_cliente_10} -> Le toca a {numero_vendedor}", flush=True)
         return jsonify({"status": "asignado"}), 200
     return jsonify({"error": "faltan datos"}), 400
 
