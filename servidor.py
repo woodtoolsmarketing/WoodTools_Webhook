@@ -35,6 +35,11 @@ VENDEDORES_POR_NUMERO = {
 def limpiar_numero(num):
     return ''.join(filter(str.isdigit, str(num)))
 
+def extraer_10_digitos(num):
+    # MAGIA ANTI-BUG: Ignora el +54 o +549 de Argentina y se queda con lo importante
+    solo_numeros = limpiar_numero(num)
+    return solo_numeros[-10:] if len(solo_numeros) >= 10 else solo_numeros
+
 # ==========================================
 # BASE DE DATOS LOCAL
 # ==========================================
@@ -44,7 +49,6 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS mensajes (id TEXT PRIMARY KEY, telefono TEXT, estado TEXT, fecha TIMESTAMP)''')
     c.execute('''CREATE TABLE IF NOT EXISTS metricas_diarias (fecha TEXT PRIMARY KEY, enviados INTEGER, entregados INTEGER, leidos INTEGER, respondidos INTEGER)''')
     c.execute('''CREATE TABLE IF NOT EXISTS chat_sesiones (telefono TEXT PRIMARY KEY, historial TEXT, ultima_interaccion TIMESTAMP, advertido INTEGER DEFAULT 0)''')
-    # NUEVA TABLA V2: Ahora guarda el tipo de campaña y subtipo
     c.execute('''CREATE TABLE IF NOT EXISTS asignaciones_v2 (telefono_cliente TEXT PRIMARY KEY, numero_vendedor TEXT, tipo_campana TEXT, subtipo TEXT)''')
     conn.commit()
     conn.close()
@@ -106,11 +110,13 @@ scheduler.start()
 # ==========================================
 # CEREBRO IA: GENERADOR DE PROMPTS CON FRASES PREDEFINIDAS
 # ==========================================
-def obtener_prompt_personalizado(telefono_cliente):
-    telefono_limpio = limpiar_numero(telefono_cliente)
+def obtener_prompt_personalizado(telefono_cliente_completo):
+    # Buscamos en la base de datos usando SOLO los últimos 10 dígitos
+    tel_10_digitos = extraer_10_digitos(telefono_cliente_completo)
+    
     conn = sqlite3.connect('memoria_mensajes.db')
     c = conn.cursor()
-    c.execute("SELECT numero_vendedor, tipo_campana, subtipo FROM asignaciones_v2 WHERE telefono_cliente = ?", (telefono_limpio,))
+    c.execute("SELECT numero_vendedor, tipo_campana, subtipo FROM asignaciones_v2 WHERE telefono_cliente = ?", (tel_10_digitos,))
     res = c.fetchone()
     conn.close()
 
@@ -209,21 +215,22 @@ def enviar_mensaje_whatsapp(telefono_destino, texto):
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (Plantillas Fijas) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (Matcheo Perfecto) 🚀", 200
 
 @app.route('/asignar_vendedor', methods=['POST'])
 def asignar_vendedor():
     data = request.json
-    telefono_cliente = limpiar_numero(data.get('cliente', ''))
+    # Cuando la PC anota al cliente, guardamos solo los últimos 10 dígitos
+    telefono_cliente_10 = extraer_10_digitos(data.get('cliente', ''))
     numero_vendedor = limpiar_numero(data.get('vendedor_tel', ''))
     tipo_campana = data.get('tipo_campana', 'Promociones')
     subtipo = data.get('subtipo', '')
     
-    if telefono_cliente and numero_vendedor:
+    if telefono_cliente_10 and numero_vendedor:
         conn = sqlite3.connect('memoria_mensajes.db')
         c = conn.cursor()
         c.execute("INSERT OR REPLACE INTO asignaciones_v2 (telefono_cliente, numero_vendedor, tipo_campana, subtipo) VALUES (?, ?, ?, ?)", 
-                  (telefono_cliente, numero_vendedor, tipo_campana, subtipo))
+                  (telefono_cliente_10, numero_vendedor, tipo_campana, subtipo))
         conn.commit(); conn.close()
         return jsonify({"status": "asignado"}), 200
     return jsonify({"error": "faltan datos"}), 400
