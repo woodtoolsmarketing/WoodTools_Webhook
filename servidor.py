@@ -18,7 +18,7 @@ TOKEN_DE_VERIFICACION = "madera_tools_secreto_2026"
 CLOUD_API_TOKEN = "EAAUkLctR4q0BQ8mcvr7YtqEacloCMCDHq1AY8VE0gc0ZBIIZBboTSCSEIEOQQKbNtfD7i0HwqiJvnd9FZCdH27rlBVsOXer1Qmlx3N5GAMhO6FmRNmYwOuxCKcJAgqo9Xy8IwtiQcZCFcuJ2fIMQnO7mPvBjEYrAgCDs7eMyn1lZAT7aDaJ8SKG5I1cp7yAZDZD"
 PHONE_NUMBER_ID = "1041050652417644"
 
-# 🔑 ¡AGREGÁ TU API KEY DE GEMINI ACÁ!
+# 🔑 ¡AGREGÁ TU API KEY DE GEMINI ACÁ! 
 GEMINI_API_KEY = "AIzaSyCddpmsEtBDLYvFsw4mXikrtNmYb3scoeE"
 genai.configure(api_key=GEMINI_API_KEY)
 
@@ -34,7 +34,6 @@ VENDEDORES_POR_NUMERO = {
 }
 
 def limpiar_numero(num):
-    # Esto asegura que el número no tenga signos '+', espacios o caracteres raros
     return ''.join(filter(str.isdigit, str(num)))
 
 # ==========================================
@@ -118,31 +117,32 @@ def obtener_prompt_personalizado(telefono_cliente):
     res = c.fetchone()
     conn.close()
 
-    # Si no lo encuentra, asume Valentín (Fallback)
     tel_vend = res[0] if res else "5491145394279"
     nombre_vend = VENDEDORES_POR_NUMERO.get(tel_vend, "un asesor")
     
     link_base = f"https://wa.me/{tel_vend}?text="
     
+    # ACÁ ESTÁ LA MAGIA NUEVA DE LA PSICOLOGÍA DEL BOT
     return f"""
 Eres el asistente virtual de recepción de WoodTools. 
 Habla en español argentino (usa 'vos', empático y servicial).
 Usa formato de WhatsApp (*negritas* y emojis), NUNCA uses markdown de asteriscos dobles (**).
 
 CONTEXTO:
-El cliente acaba de recibir un mensaje de nuestra campaña publicitaria por WhatsApp (ya sea promoción, novedades o rescate) y está respondiendo para pedir información o aprovecharla.
+El cliente acaba de recibir un mensaje nuestro (con promociones, novedades de stock o seguimiento) y nos está escribiendo para pedir información.
 
-TUS REGLAS:
-1. Saluda al cliente mencionando la campaña: "¡Hola! Qué bueno que nos escribís por la campaña/promoción..."
-2. Tu ÚNICO objetivo es averiguar específicamente: a) Qué tipo de herramienta busca dentro de la promo, y b) Qué material desea cortar.
+TUS REGLAS ESTRICTAS:
+1. Saluda al cliente cordialmente. ESTÁ PROHIBIDO USAR LA PALABRA "CAMPAÑA". Habla naturalmente (ej: "¡Hola! Qué bueno que nos escribís...").
+2. Tu ÚNICO objetivo es averiguar: a) Qué tipo de herramienta busca, y b) Qué material desea cortar.
 3. NO respondas preguntas técnicas, NO des precios, NO des información de stock.
 4. El vendedor asignado a este cliente en particular es **{nombre_vend}**. NO le preguntes con quién quiere hablar.
-5. Una vez que tengas la herramienta y el material (O si el cliente te pide precios directo), interrumpe amablemente, dile que {nombre_vend} le pasará toda la info de la campaña y DESPÍDETE ENVIANDO SU LINK DIRECTO.
+5. Una vez que tengas la herramienta y el material (O si el cliente te pide precios directo), interrumpe amablemente, dile que {nombre_vend} le pasará los valores y la información exacta, y DESPÍDETE ENVIANDO SU LINK DIRECTO.
 
 FORMATO DEL LINK (MUY IMPORTANTE):
-Arma un link con el resumen. Reemplaza los espacios por '%20'.
+Arma un link detallando qué herramienta y material busca el cliente. NO uses la palabra "campaña".
+Reemplaza los espacios por '%20'.
 El link EXACTO que debes usar como base es este: {link_base}
-Ejemplo de salida: "Perfecto, te paso directamente con {nombre_vend} para que te pase los precios de la campaña: {link_base}Hola%20{nombre_vend}%20vengo%20por%20la%20campana%20y%20busco%20sierras%20para%20melamina"
+Ejemplo de salida: "Perfecto, te paso directamente con {nombre_vend} para que te pase los precios y te asesore mejor: {link_base}Hola%20{nombre_vend}%20me%20interesan%20los%20descuentos%20en%20sierras%20para%20cortar%20melamina"
 """
 
 def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
@@ -157,7 +157,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
         prompt_dinamico = obtener_prompt_personalizado(telefono_cliente)
         historial = [
             {"role": "user", "parts": [prompt_dinamico]},
-            {"role": "model", "parts": ["Entendido. Soy el asistente. Saludaré mencionando la campaña, preguntaré por herramienta y material, y luego pasaré el link de su asesor asignado sin dar precios."]}
+            {"role": "model", "parts": ["Entendido. Soy el asistente. Saludaré amablemente sin usar la palabra 'campaña', preguntaré por herramienta y material, y derivaré al cliente usando un link que mencione su interés específico."]}
         ]
         
     historial.append({"role": "user", "parts": [texto_entrante]})
