@@ -36,12 +36,11 @@ def limpiar_numero(num):
     return ''.join(filter(str.isdigit, str(num)))
 
 def extraer_10_digitos(num):
-    # MAGIA ANTI-BUG: Ignora el +54 o +549 de Argentina y se queda con lo importante
     solo_numeros = limpiar_numero(num)
     return solo_numeros[-10:] if len(solo_numeros) >= 10 else solo_numeros
 
 # ==========================================
-# BASE DE DATOS LOCAL
+# BASE DE DATOS LOCAL (Render)
 # ==========================================
 def init_db():
     conn = sqlite3.connect('memoria_mensajes.db')
@@ -108,10 +107,9 @@ scheduler.add_job(func=revisar_rutinas_de_tiempo, trigger="interval", minutes=10
 scheduler.start()
 
 # ==========================================
-# CEREBRO IA: GENERADOR DE PROMPTS CON FRASES PREDEFINIDAS
+# CEREBRO IA: GENERADOR DE PROMPTS Y MEMORIA
 # ==========================================
 def obtener_prompt_personalizado(telefono_cliente_completo):
-    # Buscamos en la base de datos usando SOLO los últimos 10 dígitos
     tel_10_digitos = extraer_10_digitos(telefono_cliente_completo)
     
     conn = sqlite3.connect('memoria_mensajes.db')
@@ -125,7 +123,6 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
     subtipo = res[2] if res else ""
     nombre_vend = VENDEDORES_POR_NUMERO.get(tel_vend, "un asesor")
     
-    # SELECCIÓN EXACTA DE PLANTILLAS
     plantillas = {
         "Promociones": "Hola, vengo por la promoción de [herramienta] para [material] y quisiera tener más información",
         "Rescate (Te extrañamos)": "Hola, vengo por el anuncio que me enviaron y quería novedades sobre [herramienta] para [material]",
@@ -153,7 +150,7 @@ CONTEXTO:
 El cliente recibió una campaña del tipo "{tipo_camp}" y está respondiendo.
 
 TUS REGLAS ESTRICTAS:
-1. Saluda cordialmente.
+1. Saluda cordialmente. ESTÁ PROHIBIDO USAR LA PALABRA "CAMPAÑA".
 2. Tu objetivo es obtener la información necesaria para completar la siguiente frase: "{frase_link}".
    - Si la frase tiene [herramienta] y [material], pregúntale ambas cosas al cliente sutilmente.
    - Si la frase NO tiene corchetes (ej. Gira Vendedor), NO preguntes nada de herramientas ni materiales, solo despídete y pasa el link.
@@ -174,10 +171,17 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
     c.execute("SELECT historial FROM chat_sesiones WHERE telefono = ?", (telefono_cliente,))
     resultado = c.fetchone()
     
+    # Buscamos SIEMPRE las instrucciones de la campaña actual
+    prompt_dinamico = obtener_prompt_personalizado(telefono_cliente)
+    
     if resultado:
         historial = json.loads(resultado[0])
+        # ESTA ES LA MAGIA ANTI-MEMORIA VIEJA: 
+        # Forzamos a la IA a que se actualice con el vendedor de la nueva campaña, 
+        # incluso si ya venían charlando de otra cosa antes.
+        if len(historial) > 0 and historial[0]["role"] == "user":
+            historial[0]["parts"] = [prompt_dinamico]
     else:
-        prompt_dinamico = obtener_prompt_personalizado(telefono_cliente)
         historial = [
             {"role": "user", "parts": [prompt_dinamico]},
             {"role": "model", "parts": ["Entendido. Soy el asistente. Haré las preguntas justas para rellenar los corchetes de la frase predefinida, y luego armaré el link exactamente con esa frase codificada."]}
@@ -215,12 +219,11 @@ def enviar_mensaje_whatsapp(telefono_destino, texto):
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (Matcheo Perfecto) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (Solución Memoria) 🚀", 200
 
 @app.route('/asignar_vendedor', methods=['POST'])
 def asignar_vendedor():
     data = request.json
-    # Cuando la PC anota al cliente, guardamos solo los últimos 10 dígitos
     telefono_cliente_10 = extraer_10_digitos(data.get('cliente', ''))
     numero_vendedor = limpiar_numero(data.get('vendedor_tel', ''))
     tipo_campana = data.get('tipo_campana', 'Promociones')
