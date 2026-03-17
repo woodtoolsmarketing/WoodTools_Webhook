@@ -157,8 +157,8 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
     historial.append({"role": "user", "parts": [texto_entrante]})
     
     try:
-        # ACA ESTÁ EL CAMBIO MAGICO A GEMINI-PRO
-        model = genai.GenerativeModel('gemini-pro')
+        # ACA ESTÁ EL CAMBIO AL MODELO ACTUAL (GEMINI 2.5 FLASH)
+        model = genai.GenerativeModel('gemini-2.5-flash')
         chat = model.start_chat(history=historial[:-1])
         respuesta = chat.send_message(texto_entrante)
         texto_respuesta = respuesta.text
