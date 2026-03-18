@@ -12,14 +12,22 @@ import json
 app = Flask(__name__)
 
 # ==========================================
-# CONFIGURACIÓN Y CREDENCIALES
+# CONFIGURACIÓN SEGURA (Carga desde tokens.json)
 # ==========================================
-TOKEN_DE_VERIFICACION = "madera_tools_secreto_2026"
-CLOUD_API_TOKEN = "EAAUkLctR4q0BQ8mcvr7YtqEacloCMCDHq1AY8VE0gc0ZBIIZBboTSCSEIEOQQKbNtfD7i0HwqiJvnd9FZCdH27rlBVsOXer1Qmlx3N5GAMhO6FmRNmYwOuxCKcJAgqo9Xy8IwtiQcZCFcuJ2fIMQnO7mPvBjEYrAgCDs7eMyn1lZAT7aDaJ8SKG5I1cp7yAZDZD"
-PHONE_NUMBER_ID = "1041050652417644"
+# Intentamos leer desde los Secret Files de Render o localmente
+ruta_tokens = "/etc/secrets/tokens.json" if os.path.exists("/etc/secrets/tokens.json") else "tokens.json"
 
-# 🔑 ¡AGREGÁ TU API KEY DE GEMINI ACÁ! 
-GEMINI_API_KEY = "AIzaSyCMZaulmL0a5eGcZOkwrZBbj19115TJOFk"
+try:
+    with open(ruta_tokens, 'r') as f:
+        credenciales_api = json.load(f)
+    TOKEN_DE_VERIFICACION = credenciales_api.get("TOKEN_DE_VERIFICACION", "")
+    CLOUD_API_TOKEN = credenciales_api.get("CLOUD_API_TOKEN", "")
+    PHONE_NUMBER_ID = credenciales_api.get("PHONE_NUMBER_ID", "")
+    GEMINI_API_KEY = credenciales_api.get("GEMINI_API_KEY", "")
+except Exception as e:
+    print(f"⚠️ ATENCIÓN: No se pudo cargar tokens.json. Asegurate de haberlo subido a Secret Files en Render. Error: {e}")
+    TOKEN_DE_VERIFICACION = CLOUD_API_TOKEN = PHONE_NUMBER_ID = GEMINI_API_KEY = ""
+
 genai.configure(api_key=GEMINI_API_KEY)
 
 RUTA_CREDENCIALES = "/etc/secrets/credenciales.json" 
@@ -107,7 +115,7 @@ scheduler.add_job(func=revisar_rutinas_de_tiempo, trigger="interval", minutes=10
 scheduler.start()
 
 # ==========================================
-# CEREBRO IA: GENERADOR DE PROMPTS Y MEMORIA
+# CEREBRO IA: GENERADOR DE PROMPTS Y MEMORIA DE 3 HORAS
 # ==========================================
 def obtener_prompt_personalizado(telefono_cliente_completo):
     tel_10_digitos = extraer_10_digitos(telefono_cliente_completo)
@@ -123,8 +131,6 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
     subtipo = res[2] if res else ""
     nombre_vend = VENDEDORES_POR_NUMERO.get(tel_vend, "un asesor")
     
-    print(f"🔍 MEMORIA: El cliente {tel_10_digitos} fue asignado a {nombre_vend} para la campaña {tipo_camp}", flush=True)
-
     plantillas = {
         "Promociones": "Hola, vengo por la promoción de [herramienta] para [material] y quisiera tener más información",
         "Rescate (Te extrañamos)": "Hola, vengo por el anuncio que me enviaron y quería novedades sobre [herramienta] para [material]",
@@ -177,6 +183,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
     
     if resultado:
         historial = json.loads(resultado[0])
+        # Inyectamos el prompt actualizado por si cambió la campaña, pero mantenemos la memoria de 3hs intacta
         if len(historial) > 0 and historial[0]["role"] == "user":
             historial[0]["parts"] = [prompt_dinamico]
     else:
@@ -217,13 +224,12 @@ def enviar_mensaje_whatsapp(telefono_destino, texto):
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (Anti-Memoria Vieja) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (Seguridad JSON Activada) 🚀", 200
 
 @app.route('/asignar_vendedor', methods=['POST'])
 def asignar_vendedor():
     data = request.json
-    cliente_raw = data.get('cliente', '')
-    telefono_cliente_10 = extraer_10_digitos(cliente_raw)
+    telefono_cliente_10 = extraer_10_digitos(data.get('cliente', ''))
     numero_vendedor = limpiar_numero(data.get('vendedor_tel', ''))
     tipo_campana = data.get('tipo_campana', 'Promociones')
     subtipo = data.get('subtipo', '')
@@ -231,17 +237,10 @@ def asignar_vendedor():
     if telefono_cliente_10 and numero_vendedor:
         conn = sqlite3.connect('memoria_mensajes.db')
         c = conn.cursor()
-        
-        # 1. Guardamos la nueva asignación
         c.execute("INSERT OR REPLACE INTO asignaciones_v2 (telefono_cliente, numero_vendedor, tipo_campana, subtipo) VALUES (?, ?, ?, ?)", 
                   (telefono_cliente_10, numero_vendedor, tipo_campana, subtipo))
-        
-        # 2. EL BORRADO DE MEMORIA (MAGIA)
-        # Forzamos a la base de datos a olvidar cualquier charla previa con este cliente
-        c.execute("DELETE FROM chat_sesiones WHERE telefono = ? OR telefono LIKE ?", (cliente_raw, f"%{telefono_cliente_10}"))
-        
+        # Se removió el borrado forzado de memoria. Ahora respeta las 3 horas.
         conn.commit(); conn.close()
-        print(f"✅ PC AVISÓ A RENDER: Disparo a {telefono_cliente_10} -> Le toca a {numero_vendedor}", flush=True)
         return jsonify({"status": "asignado"}), 200
     return jsonify({"error": "faltan datos"}), 400
 
