@@ -14,7 +14,6 @@ app = Flask(__name__)
 # ==========================================
 # CONFIGURACIÓN SEGURA (Carga desde tokens.json)
 # ==========================================
-# Intentamos leer desde los Secret Files de Render o localmente
 ruta_tokens = "/etc/secrets/tokens.json" if os.path.exists("/etc/secrets/tokens.json") else "tokens.json"
 
 try:
@@ -32,13 +31,6 @@ genai.configure(api_key=GEMINI_API_KEY)
 
 RUTA_CREDENCIALES = "/etc/secrets/credenciales.json" 
 NOMBRE_HOJA = "Base de datos wt"
-
-VENDEDORES_POR_NUMERO = {
-    "5491145394279": "Valentín",
-    "5491165630406": "Carlos",
-    "5491157528428": "Emmanuel",
-    "5491100000000": "Ariel" # REEMPLAZAR POR EL DE ARIEL
-}
 
 def limpiar_numero(num):
     return ''.join(filter(str.isdigit, str(num)))
@@ -115,7 +107,7 @@ scheduler.add_job(func=revisar_rutinas_de_tiempo, trigger="interval", minutes=10
 scheduler.start()
 
 # ==========================================
-# CEREBRO IA: GENERADOR DE PROMPTS Y MEMORIA DE 3 HORAS
+# CEREBRO IA: LÓGICA CONDICIONAL DE NOMBRES
 # ==========================================
 def obtener_prompt_personalizado(telefono_cliente_completo):
     tel_10_digitos = extraer_10_digitos(telefono_cliente_completo)
@@ -126,15 +118,15 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
     res = c.fetchone()
     conn.close()
 
+    # Si la base de datos no tiene info, el número por defecto será el de Valentín.
     tel_vend = res[0] if res else "5491145394279"
     tipo_camp = res[1] if res else "Promociones"
     subtipo = res[2] if res else ""
-    nombre_vend = VENDEDORES_POR_NUMERO.get(tel_vend, "un asesor")
     
     plantillas = {
         "Promociones": "Hola, vengo por la promoción de [herramienta] para [material] y quisiera tener más información",
         "Rescate (Te extrañamos)": "Hola, vengo por el anuncio que me enviaron y quería novedades sobre [herramienta] para [material]",
-        "Gira Vendedor": f"Hola, me comentaron que {nombre_vend} va a estar visitando mi zona dentro de poco. Quisiera poder arreglar para una visita",
+        "Gira Vendedor": "Hola, me comentaron que [Vendedor] va a estar visitando mi zona dentro de poco. Quisiera poder arreglar para una visita",
         "Personalizado": "Hola Vengo por el anuncio de [herramienta] para [material]",
         "Recotización": "Hola, vengo del aviso de una recotización sobre [herramienta]"
     }
@@ -146,31 +138,38 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
             frase_link = "Hola, me comentaron que entró nuevo stock de [herramienta]"
     else:
         frase_link = plantillas.get(tipo_camp, plantillas["Promociones"])
-
-    link_base = f"https://wa.me/{tel_vend}?text="
     
     return f"""
 Eres el asistente virtual de recepción de WoodTools. 
 Habla en español argentino (usa 'vos', empático y servicial).
 Usa formato de WhatsApp (*negritas* y emojis), NUNCA uses markdown de asteriscos dobles (**).
 
-CONTEXTO:
-El cliente recibió una campaña del tipo "{tipo_camp}" y está respondiendo.
+CONTEXTO DE LA CAMPAÑA:
+El cliente está respondiendo a una campaña del tipo "{tipo_camp}".
 
-TUS REGLAS ESTRICTAS:
-1. Saluda cordialmente. ESTÁ PROHIBIDO USAR LA PALABRA "CAMPAÑA".
+REGLA DE IDENTIFICACIÓN DEL VENDEDOR (¡MUY IMPORTANTE!):
+El número de WhatsApp del vendedor asignado a este cliente es exactamente: {tel_vend}
+Aplica ESTRICTAMENTE la siguiente regla para saber cómo se llama y referirte a él:
+- Si el número es 5491145394279 el vendedor es "Valentín"
+- Si el número es 5491157528428 el vendedor es "Emmanuel"
+- Si el número es 5491134811771 el vendedor es "Ariel"
+- Si el número es 5491165630406 el vendedor es "Carlos"
+
+TUS REGLAS DE CHARLA:
+1. Saluda cordialmente (ESTÁ PROHIBIDO USAR LA PALABRA "CAMPAÑA").
 2. Tu objetivo es obtener la información necesaria para completar la siguiente frase: "{frase_link}".
    - Si la frase tiene [herramienta] y [material], pregúntale ambas cosas al cliente sutilmente.
-   - Si la frase NO tiene corchetes (ej. Gira Vendedor), NO preguntes nada de herramientas ni materiales, solo despídete y pasa el link.
+   - Si la frase NO tiene corchetes o solo pide [Vendedor], NO preguntes por herramientas.
 3. NO respondas preguntas técnicas, NO des precios, NO des información de stock.
-4. El vendedor asignado es **{nombre_vend}**.
-5. Una vez que tengas los datos para llenar los corchetes de la frase, interrumpe amablemente, dile que {nombre_vend} lo ayudará, y DESPÍDETE ENVIANDO EL LINK.
+4. CIERRE: Una vez que tengas los datos, dile al cliente que [Nombre del Vendedor identificado en la regla anterior] lo va a ayudar, y despídete mandando el link.
 
-FORMATO DEL LINK (MUY IMPORTANTE):
-DEBES usar EXACTAMENTE esta frase para el texto del link: "{frase_link}"
-Reemplaza los campos [herramienta] y [material] con lo que te dijo el cliente.
-Codifica los espacios con '%20'.
-El link EXACTO que debes usar como base es este: {link_base}
+FORMATO DEL LINK A WHATSAPP:
+El link debe tener integrado lo que te respondió el cliente sobre la campaña.
+- Reemplaza [herramienta] y [material] con lo que te pidió.
+- Si la frase incluye [Vendedor], reemplázalo con el nombre que dedujiste.
+- Codifica los espacios con '%20'.
+El link EXACTO debe construirse así:
+https://wa.me/{tel_vend}?text=[FRASE_COMPLETADA_Y_CODIFICADA]
 """
 
 def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
@@ -183,13 +182,13 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
     
     if resultado:
         historial = json.loads(resultado[0])
-        # Inyectamos el prompt actualizado por si cambió la campaña, pero mantenemos la memoria de 3hs intacta
+        # Actualizamos la lógica condicional en la memoria por si la campaña cambió
         if len(historial) > 0 and historial[0]["role"] == "user":
             historial[0]["parts"] = [prompt_dinamico]
     else:
         historial = [
             {"role": "user", "parts": [prompt_dinamico]},
-            {"role": "model", "parts": ["Entendido. Soy el asistente. Haré las preguntas justas para rellenar los corchetes de la frase predefinida, y luego armaré el link exactamente con esa frase codificada."]}
+            {"role": "model", "parts": ["Entendido. Aplicaré la regla para identificar al vendedor por su número, averiguaré lo necesario y armaré el link con la frase integrada."]}
         ]
         
     historial.append({"role": "user", "parts": [texto_entrante]})
@@ -224,7 +223,7 @@ def enviar_mensaje_whatsapp(telefono_destino, texto):
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (Seguridad JSON Activada) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (Lógica Condicional) 🚀", 200
 
 @app.route('/asignar_vendedor', methods=['POST'])
 def asignar_vendedor():
@@ -239,7 +238,6 @@ def asignar_vendedor():
         c = conn.cursor()
         c.execute("INSERT OR REPLACE INTO asignaciones_v2 (telefono_cliente, numero_vendedor, tipo_campana, subtipo) VALUES (?, ?, ?, ?)", 
                   (telefono_cliente_10, numero_vendedor, tipo_campana, subtipo))
-        # Se removió el borrado forzado de memoria. Ahora respeta las 3 horas.
         conn.commit(); conn.close()
         return jsonify({"status": "asignado"}), 200
     return jsonify({"error": "faltan datos"}), 400
