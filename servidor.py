@@ -287,7 +287,27 @@ def recibir_notificaciones():
                 
         except Exception as e: pass
     return jsonify({"status": "ok"}), 200
+@app.route('/metricas', methods=['GET'])
+def obtener_metricas():
+    try:
+        conn = sqlite3.connect('memoria_mensajes.db')
+        c = conn.cursor()
+        c.execute("SELECT fecha, enviados, entregados, leidos, respondidos FROM metricas_diarias")
+        filas = c.fetchall()
+        conn.close()
 
+        datos_nube = {}
+        for fila in filas:
+            fecha, enviados, entregados, leidos, respondidos = fila
+            datos_nube[fecha] = {
+                "enviados": enviados,
+                "entregados": entregados,
+                "leidos": leidos,
+                "respondidos": respondidos
+            }
+        return jsonify(datos_nube), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 if __name__ == '__main__':
     puerto = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=puerto)
