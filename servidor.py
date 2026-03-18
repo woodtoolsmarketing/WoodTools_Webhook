@@ -46,26 +46,42 @@ def init_db():
     conn = sqlite3.connect('memoria_mensajes.db')
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS mensajes (id TEXT PRIMARY KEY, telefono TEXT, estado TEXT, fecha TIMESTAMP)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS metricas_diarias (fecha TEXT PRIMARY KEY, enviados INTEGER, entregados INTEGER, leidos INTEGER, respondidos INTEGER)''')
     c.execute('''CREATE TABLE IF NOT EXISTS chat_sesiones (telefono TEXT PRIMARY KEY, historial TEXT, ultima_interaccion TIMESTAMP, advertido INTEGER DEFAULT 0)''')
     c.execute('''CREATE TABLE IF NOT EXISTS asignaciones_v2 (telefono_cliente TEXT PRIMARY KEY, numero_vendedor TEXT, tipo_campana TEXT, subtipo TEXT)''')
+    
+    # --- NUEVA TABLA DE MÉTRICAS POR CAMPAÑA ---
+    c.execute('''CREATE TABLE IF NOT EXISTS metricas_campanas (tanda_id TEXT PRIMARY KEY, entregados INTEGER DEFAULT 0, leidos INTEGER DEFAULT 0, respondidos INTEGER DEFAULT 0)''')
+    
+    # Actualizamos la tabla vieja para que soporte el ID de la campaña
+    try: c.execute('ALTER TABLE asignaciones_v2 ADD COLUMN tanda_id TEXT')
+    except sqlite3.OperationalError: pass
+    
     conn.commit()
     conn.close()
 
 init_db()
 
-def registrar_metrica(evento):
+def registrar_metrica(evento, telefono):
     try:
-        fecha_hoy = datetime.now().strftime('%Y-%m-%d')
+        tel_10 = extraer_10_digitos(telefono)
         conn = sqlite3.connect('memoria_mensajes.db')
         c = conn.cursor()
-        c.execute("INSERT OR IGNORE INTO metricas_diarias (fecha, enviados, entregados, leidos, respondidos) VALUES (?, 0, 0, 0, 0)", (fecha_hoy,))
-        if evento == 'sent': c.execute("UPDATE metricas_diarias SET enviados = enviados + 1 WHERE fecha = ?", (fecha_hoy,))
-        elif evento == 'delivered': c.execute("UPDATE metricas_diarias SET entregados = entregados + 1 WHERE fecha = ?", (fecha_hoy,))
-        elif evento == 'read': c.execute("UPDATE metricas_diarias SET leidos = leidos + 1 WHERE fecha = ?", (fecha_hoy,))
-        elif evento == 'responded': c.execute("UPDATE metricas_diarias SET respondidos = respondidos + 1 WHERE fecha = ?", (fecha_hoy,))
+        
+        # Buscamos a qué campaña pertenece este teléfono
+        c.execute("SELECT tanda_id FROM asignaciones_v2 WHERE telefono_cliente = ?", (tel_10,))
+        res = c.fetchone()
+        
+        if res and res[0]:
+            t_id = res[0]
+            if evento == 'delivered':
+                c.execute("UPDATE metricas_campanas SET entregados = entregados + 1 WHERE tanda_id = ?", (t_id,))
+            elif evento == 'read':
+                c.execute("UPDATE metricas_campanas SET leidos = leidos + 1 WHERE tanda_id = ?", (t_id,))
+            elif evento == 'responded':
+                c.execute("UPDATE metricas_campanas SET respondidos = respondidos + 1 WHERE tanda_id = ?", (t_id,))
+                
         conn.commit(); conn.close()
-    except Exception as e: pass
+    except Exception as e: print(f"Error métricas: {e}")
 
 def bloquear_numero_en_sheets(telefono):
     try:
@@ -118,7 +134,6 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
     res = c.fetchone()
     conn.close()
 
-    # Si la base de datos no tiene info, el número por defecto será el de Valentín.
     tel_vend = res[0] if res else "5491145394279"
     tipo_camp = res[1] if res else "Promociones"
     subtipo = res[2] if res else ""
@@ -182,7 +197,6 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
     
     if resultado:
         historial = json.loads(resultado[0])
-        # Actualizamos la lógica condicional en la memoria por si la campaña cambió
         if len(historial) > 0 and historial[0]["role"] == "user":
             historial[0]["parts"] = [prompt_dinamico]
     else:
@@ -223,7 +237,7 @@ def enviar_mensaje_whatsapp(telefono_destino, texto):
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (Lógica Condicional) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (Métricas por Campaña) 🚀", 200
 
 @app.route('/asignar_vendedor', methods=['POST'])
 def asignar_vendedor():
@@ -232,12 +246,18 @@ def asignar_vendedor():
     numero_vendedor = limpiar_numero(data.get('vendedor_tel', ''))
     tipo_campana = data.get('tipo_campana', 'Promociones')
     subtipo = data.get('subtipo', '')
+    tanda_id = data.get('tanda_id', '') # Recibimos el ID de la campaña
     
     if telefono_cliente_10 and numero_vendedor:
         conn = sqlite3.connect('memoria_mensajes.db')
         c = conn.cursor()
-        c.execute("INSERT OR REPLACE INTO asignaciones_v2 (telefono_cliente, numero_vendedor, tipo_campana, subtipo) VALUES (?, ?, ?, ?)", 
-                  (telefono_cliente_10, numero_vendedor, tipo_campana, subtipo))
+        c.execute("INSERT OR REPLACE INTO asignaciones_v2 (telefono_cliente, numero_vendedor, tipo_campana, subtipo, tanda_id) VALUES (?, ?, ?, ?, ?)", 
+                  (telefono_cliente_10, numero_vendedor, tipo_campana, subtipo, tanda_id))
+        
+        # Pre-creamos la caja de métricas para esta campaña si no existe
+        if tanda_id:
+            c.execute("INSERT OR IGNORE INTO metricas_campanas (tanda_id, entregados, leidos, respondidos) VALUES (?, 0, 0, 0)", (tanda_id,))
+            
         conn.commit(); conn.close()
         return jsonify({"status": "asignado"}), 200
     return jsonify({"error": "faltan datos"}), 400
@@ -264,7 +284,7 @@ def recibir_notificaciones():
                     texto_cliente = mensaje['text']['body']
                     
                     print(f"📩 MENSAJE de {telefono_cliente}: {texto_cliente}", flush=True)
-                    registrar_metrica('responded') 
+                    registrar_metrica('responded', telefono_cliente) # Le pasamos el número
                     procesar_mensaje_con_gemini(telefono_cliente, texto_cliente)
                 
             elif 'statuses' in cambios:
@@ -272,7 +292,7 @@ def recibir_notificaciones():
                 telefono = limpiar_numero(cambios['statuses'][0]['recipient_id'])
                 msg_id = cambios['statuses'][0]['id']
                 
-                registrar_metrica(estado)
+                registrar_metrica(estado, telefono) # Le pasamos el número
                 
                 conn = sqlite3.connect('memoria_mensajes.db')
                 c = conn.cursor()
@@ -293,15 +313,14 @@ def obtener_metricas():
     try:
         conn = sqlite3.connect('memoria_mensajes.db')
         c = conn.cursor()
-        c.execute("SELECT fecha, enviados, entregados, leidos, respondidos FROM metricas_diarias")
+        c.execute("SELECT tanda_id, entregados, leidos, respondidos FROM metricas_campanas")
         filas = c.fetchall()
         conn.close()
 
         datos_nube = {}
         for fila in filas:
-            fecha, enviados, entregados, leidos, respondidos = fila
-            datos_nube[fecha] = {
-                "enviados": enviados,
+            tanda_id, entregados, leidos, respondidos = fila
+            datos_nube[tanda_id] = {
                 "entregados": entregados,
                 "leidos": leidos,
                 "respondidos": respondidos
@@ -309,7 +328,6 @@ def obtener_metricas():
         return jsonify(datos_nube), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 if __name__ == '__main__':
     puerto = int(os.environ.get('PORT', 5000))
