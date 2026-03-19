@@ -102,25 +102,66 @@ def revisar_rutinas_de_tiempo():
     c = conn.cursor()
     ahora = datetime.now()
     
+    # Manejo de fallos en 48hs
     hace_48_horas = ahora - timedelta(hours=48)
     c.execute("SELECT id, telefono FROM mensajes WHERE estado='sent' AND fecha < ?", (hace_48_horas,))
     for msg_id, telefono in c.fetchall():
         bloquear_numero_en_sheets(telefono)
         c.execute("DELETE FROM mensajes WHERE id=?", (msg_id,))
         
-    hace_2h50m = ahora - timedelta(hours=2, minutes=50)
-    hace_3_horas = ahora - timedelta(hours=3)
+    # --- NUEVOS TIEMPOS DE ADVERTENCIA (50 MINUTOS Y 1 HORA) ---
+    hace_50_minutos = ahora - timedelta(minutes=50)
+    hace_1_hora = ahora - timedelta(hours=1)
     
-    c.execute("SELECT telefono FROM chat_sesiones WHERE ultima_interaccion < ? AND advertido = 0", (hace_2h50m,))
+    # 1. ADVERTENCIA A LOS 50 MINUTOS
+    c.execute("SELECT telefono FROM chat_sesiones WHERE ultima_interaccion < ? AND advertido = 0", (hace_50_minutos,))
     for (telefono,) in c.fetchall():
-        enviar_mensaje_whatsapp(telefono, "⚠️ Hola! Por cuestiones de seguridad, en 10 minutos se cerrará nuestra sesión de chat y perderé el hilo de nuestra conversación. ¿Te paso con tu asesor?")
+        mensaje_advertencia = "⚠️ ¡Hola! Por cuestiones de seguridad, en 10 minutos se cerrará esta conversación automática. Si no me respondés, te derivaré directamente con tu asesor asignado para que te contacte y continúe atendiéndote. ¿Pudiste revisar lo que te comenté?"
+        enviar_mensaje_whatsapp(telefono, mensaje_advertencia)
         c.execute("UPDATE chat_sesiones SET advertido = 1 WHERE telefono = ?", (telefono,))
         
-    c.execute("DELETE FROM chat_sesiones WHERE ultima_interaccion < ?", (hace_3_horas,))
+    # 2. CIERRE Y DERIVACIÓN A LA HORA (60 MINUTOS)
+    c.execute("SELECT telefono, historial FROM chat_sesiones WHERE ultima_interaccion < ?", (hace_1_hora,))
+    for telefono, historial_str in c.fetchall():
+        # Buscamos a qué vendedor le tocaba este cliente
+        tel_10 = extraer_10_digitos(telefono)
+        c.execute("SELECT numero_vendedor, tipo_campana FROM asignaciones_v2 WHERE telefono_cliente = ?", (tel_10,))
+        datos_asignacion = c.fetchone()
+        
+        if datos_asignacion:
+            vendedor_tel = datos_asignacion[0]
+            campana = datos_asignacion[1]
+            
+            # Rescatamos el último mensaje real que mandó el cliente
+            historial = json.loads(historial_str)
+            ultimo_msg_cliente = "Sin mensajes recientes."
+            for msg in reversed(historial):
+                if msg.get("role") == "user" and "CONTEXTO DE LA CAMPAÑA" not in msg.get("parts", [""])[0]:
+                    ultimo_msg_cliente = msg["parts"][0]
+                    break
+
+            # Armamos el aviso para el Asesor Humano
+            aviso_asesor = (
+                f"🤖 *AVISO DEL BOT AUTOMÁTICO*\n\n"
+                f"El cliente con número +{telefono} ingresó por la campaña *{campana}*, pero el chat expiró por inactividad.\n\n"
+                f"💬 *Último mensaje del cliente:*\n\"{ultimo_msg_cliente}\"\n\n"
+                f"👉 *Acción requerida:* Por favor, contactalo directamente para no perder la venta."
+            )
+            
+            # Le mandamos el aviso al vendedor (si hay un número asignado)
+            if vendedor_tel and vendedor_tel != "5491145394279": # Validación por las dudas
+                enviar_mensaje_whatsapp(vendedor_tel, aviso_asesor)
+            else:
+                # Fallback al número de Valentín o general si no hay vendedor_tel
+                enviar_mensaje_whatsapp("5491145394279", aviso_asesor)
+
+        # Finalmente, borramos la sesión del cliente
+        c.execute("DELETE FROM chat_sesiones WHERE telefono = ?", (telefono,))
+        
     conn.commit(); conn.close()
 
 scheduler = BackgroundScheduler()
-scheduler.add_job(func=revisar_rutinas_de_tiempo, trigger="interval", minutes=10)
+scheduler.add_job(func=revisar_rutinas_de_tiempo, trigger="interval", minutes=5) # Lo bajé a 5 min para que sea más preciso al detectar la hora exacta
 scheduler.start()
 
 # ==========================================
@@ -170,17 +211,24 @@ Aplica ESTRICTAMENTE la siguiente regla para saber cómo se llama y referirte a 
 - Si el número es 5491157528428 el vendedor es "Emmanuel"
 - Si el número es 5491134811771 el vendedor es "Ariel"
 - Si el número es 5491165630406 el vendedor es "Carlos"
+- Si el número es 5491164591316 el vendedor es "Roberto Golik"
+- Si el número es 5491157528427 el vendedor es "Nicolas Saad"
+- Si el número es 5491153455274 el vendedor es "Ezequiel Calvi"
+- Si el número es 5491156321012 el vendedor es "Alan Calvi"
+- Si el número es 5491168457778 el vendedor es "Luis Quevedo"
 
-TUS REGLAS DE CHARLA:
+TUS REGLAS DE CHARLA (¡ESTRICTAS!):
 1. Saluda cordialmente (ESTÁ PROHIBIDO USAR LA PALABRA "CAMPAÑA").
-2. Tu objetivo es obtener la información necesaria para completar la siguiente frase: "{frase_link}".
-   - Si la frase tiene [herramienta] y [material], pregúntale ambas cosas al cliente sutilmente.
+2. Tu OBJETIVO ÚNICO es obtener la información necesaria para armar esta frase: "{frase_link}".
+   - Si la frase tiene [herramienta] y [material], pregúntale ambas cosas al cliente de forma sutil y directa.
    - Si la frase NO tiene corchetes o solo pide [Vendedor], NO preguntes por herramientas.
-3. NO respondas preguntas técnicas, NO des precios, NO des información de stock.
-4. CIERRE: Una vez que tengas los datos, dile al cliente que [Nombre del Vendedor identificado en la regla anterior] lo va a ayudar, y despídete mandando el link.
+3. REGLA DE HIERRO: NO respondes NADA que salga de tu objetivo. NO das precios, NO hablas de envíos, NO das información de stock, NO haces asesoría técnica.
+4. ¿QUÉ HACER SI PREGUNTAN OTRA COSA?: Si el cliente hace CUALQUIER pregunta técnica o comercial fuera de decirte qué herramienta/material usa, CORTAS EL CHAT respondiendo EXACTAMENTE esto:
+   "Esa es una gran pregunta técnica. Te voy a derivar con [Nombre del Vendedor], tu asesor comercial, para que te brinde esa información precisa. Hacé clic en este enlace para hablar con él 👉 https://wa.me/{tel_vend}?text=Hola,%20tengo%20una%20consulta"
+   (No respondas nada más, solo esa derivación).
+5. CIERRE NORMAL: Una vez que el cliente te dé el material y la herramienta (o los datos que pediste), dile que [Nombre del Vendedor] lo va a ayudar, despídete y mándale el link con la frase completa.
 
-FORMATO DEL LINK A WHATSAPP:
-El link debe tener integrado lo que te respondió el cliente sobre la campaña.
+FORMATO DEL LINK A WHATSAPP PARA EL CIERRE:
 - Reemplaza [herramienta] y [material] con lo que te pidió.
 - Si la frase incluye [Vendedor], reemplázalo con el nombre que dedujiste.
 - Codifica los espacios con '%20'.
@@ -203,7 +251,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
     else:
         historial = [
             {"role": "user", "parts": [prompt_dinamico]},
-            {"role": "model", "parts": ["Entendido. Aplicaré la regla para identificar al vendedor por su número, averiguaré lo necesario y armaré el link con la frase integrada."]}
+            {"role": "model", "parts": ["Entendido. Aplicaré las reglas de forma hiper estricta. Si me hacen preguntas fuera de mi alcance, derivaré inmediatamente al vendedor sin responder la duda técnica."]}
         ]
         
     historial.append({"role": "user", "parts": [texto_entrante]})
