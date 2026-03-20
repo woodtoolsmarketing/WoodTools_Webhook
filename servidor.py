@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import urllib.parse
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
@@ -7,25 +8,46 @@ import gspread
 from apscheduler.schedulers.background import BackgroundScheduler
 import google.generativeai as genai
 import json
-import psycopg2 # <--- EL NUEVO MOTOR DE BASE DE DATOS PERMANENTE
+import psycopg2 
 
 app = Flask(__name__)
 
 # ==========================================
-# CONFIGURACIÓN SEGURA (Carga desde tokens.json)
+# CONFIGURACIÓN SEGURA (Inteligente)
 # ==========================================
-ruta_tokens = "/etc/secrets/tokens.json" if os.path.exists("/etc/secrets/tokens.json") else "tokens.json"
+# Buscamos el archivo con diferentes nombres por si hay diferencias entre local y Render
+posibles_rutas = [
+    "/etc/secrets/tokens.json",
+    "/etc/secrets/token.json",
+    "tokens.json",
+    "token.json"
+]
+
+ruta_correcta = None
+for ruta in posibles_rutas:
+    if os.path.exists(ruta):
+        ruta_correcta = ruta
+        break
 
 try:
-    with open(ruta_tokens, 'r') as f:
-        credenciales_api = json.load(f)
+    if ruta_correcta:
+        with open(ruta_correcta, 'r') as f:
+            credenciales_api = json.load(f)
+    else:
+        credenciales_api = {}
+        print("⚠️ No se encontró ningún archivo de tokens. Se intentará usar Variables de Entorno.")
+        
     TOKEN_DE_VERIFICACION = credenciales_api.get("TOKEN_DE_VERIFICACION", "")
     CLOUD_API_TOKEN = credenciales_api.get("CLOUD_API_TOKEN", "")
     PHONE_NUMBER_ID = credenciales_api.get("PHONE_NUMBER_ID", "")
     GEMINI_API_KEY = credenciales_api.get("GEMINI_API_KEY", "")
     DATABASE_URL = credenciales_api.get("DATABASE_URL", os.environ.get("DATABASE_URL", ""))
+    
+    if not DATABASE_URL:
+        print("❌ ERROR FATAL: No se detectó la DATABASE_URL de Neon. Revisa tu archivo json en Render.")
+        
 except Exception as e:
-    print(f"⚠️ ATENCIÓN: No se pudo cargar tokens.json. Error: {e}")
+    print(f"⚠️ ATENCIÓN: Error procesando credenciales: {e}")
     TOKEN_DE_VERIFICACION = CLOUD_API_TOKEN = PHONE_NUMBER_ID = GEMINI_API_KEY = DATABASE_URL = ""
 
 genai.configure(api_key=GEMINI_API_KEY)
@@ -76,7 +98,6 @@ def registrar_metrica(evento, telefono):
         
         if res and res[0]:
             t_id = res[0]
-            # ON CONFLICT es la forma en que PostgreSQL maneja los duplicados (reemplazo de SQLite INSERT OR IGNORE)
             c.execute("""
                 INSERT INTO tracking_metricas (tanda_id, telefono, evento) 
                 VALUES (%s, %s, %s) 
