@@ -4,3 +4,4 @@ requests==2.31.0
 gspread
 APScheduler
 google-generativeai
+psycopg2-binary
