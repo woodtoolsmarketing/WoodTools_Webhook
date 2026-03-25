@@ -13,9 +13,8 @@ import psycopg2
 app = Flask(__name__)
 
 # ==========================================
-# CONFIGURACIÓN SEGURA (Inteligente)
+# CONFIGURACIÓN SEGURA
 # ==========================================
-# Buscamos el archivo con diferentes nombres por si hay diferencias entre local y Render
 posibles_rutas = [
     "/etc/secrets/tokens.json",
     "/etc/secrets/token.json",
@@ -51,16 +50,26 @@ except Exception as e:
     TOKEN_DE_VERIFICACION = CLOUD_API_TOKEN = PHONE_NUMBER_ID = GEMINI_API_KEY = DATABASE_URL = ""
 
 genai.configure(api_key=GEMINI_API_KEY)
-
-RUTA_CREDENCIALES = "/etc/secrets/credenciales.json" 
 NOMBRE_HOJA = "Base de datos wt"
 
+# --- RUTA PARA LA CUENTA DE SERVICIO (Para editar Google Sheets) ---
+RUTA_CREDENCIALES = "/etc/secrets/credenciales.json" if os.path.exists("/etc/secrets/credenciales.json") else "credenciales.json"
+
+# ==========================================
+# FUNCIONES BÁSICAS Y DE ENVÍO
+# ==========================================
 def limpiar_numero(num):
     return ''.join(filter(str.isdigit, str(num)))
 
 def extraer_10_digitos(num):
     solo_numeros = limpiar_numero(num)
     return solo_numeros[-10:] if len(solo_numeros) >= 10 else solo_numeros
+
+def enviar_mensaje_whatsapp(telefono_destino, texto):
+    url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
+    headers = {"Authorization": f"Bearer {CLOUD_API_TOKEN}", "Content-Type": "application/json"}
+    data = {"messaging_product": "whatsapp", "to": telefono_destino, "type": "text", "text": {"body": texto}}
+    requests.post(url, headers=headers, json=data)
 
 # ==========================================
 # BASE DE DATOS EN LA NUBE (PostgreSQL)
@@ -76,9 +85,8 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS chat_sesiones (telefono TEXT PRIMARY KEY, historial TEXT, ultima_interaccion TIMESTAMP, advertido INTEGER DEFAULT 0)''')
         c.execute('''CREATE TABLE IF NOT EXISTS asignaciones_v2 (telefono_cliente TEXT PRIMARY KEY, numero_vendedor TEXT, tipo_campana TEXT, subtipo TEXT, tanda_id TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS metricas_campanas (tanda_id TEXT PRIMARY KEY, entregados INTEGER DEFAULT 0, leidos INTEGER DEFAULT 0, respondidos INTEGER DEFAULT 0)''')
-        
-        # --- Seguimiento estricto de eventos únicos por cliente ---
         c.execute('''CREATE TABLE IF NOT EXISTS tracking_metricas (tanda_id TEXT, telefono TEXT, evento TEXT, PRIMARY KEY(tanda_id, telefono, evento))''')
+        c.execute('''CREATE TABLE IF NOT EXISTS chats_derivados (telefono TEXT PRIMARY KEY, vendedor TEXT, historial TEXT, fecha TIMESTAMP)''')
         
         conn.commit()
         conn.close()
@@ -117,13 +125,20 @@ def registrar_metrica(evento, telefono):
 
 def bloquear_numero_en_sheets(telefono):
     try:
+        if not os.path.exists(RUTA_CREDENCIALES):
+            print("❌ No se encontró credenciales.json para editar Google Sheets.")
+            return False
+            
+        # USAMOS SERVICE ACCOUNT PARA CONECTARNOS COMO BOT
         gc = gspread.service_account(filename=RUTA_CREDENCIALES)
         sh = gc.open(NOMBRE_HOJA)
+        
         for ws in sh.worksheets():
             try:
                 celda = ws.find(telefono)
                 if celda:
                     ws.update_cell(celda.row, celda.col, f"0000{telefono}")
+                    print(f"✅ Número {telefono} bloqueado exitosamente en Sheets.")
                     return True
             except gspread.exceptions.CellNotFound: continue
     except Exception as e: print(f"❌ Error conectando a Sheets: {e}", flush=True)
@@ -134,14 +149,12 @@ def revisar_rutinas_de_tiempo():
         c = conn.cursor()
         ahora = datetime.now()
         
-        # Manejo de fallos en 48hs
         hace_48_horas = ahora - timedelta(hours=48)
         c.execute("SELECT id, telefono FROM mensajes WHERE estado='sent' AND fecha < %s", (hace_48_horas,))
         for msg_id, telefono in c.fetchall():
             bloquear_numero_en_sheets(telefono)
             c.execute("DELETE FROM mensajes WHERE id=%s", (msg_id,))
             
-        # 1. ADVERTENCIA A LOS 50 MINUTOS
         hace_50_minutos = ahora - timedelta(minutes=50)
         c.execute("SELECT telefono FROM chat_sesiones WHERE ultima_interaccion < %s AND advertido = 0", (hace_50_minutos,))
         for (telefono,) in c.fetchall():
@@ -149,36 +162,39 @@ def revisar_rutinas_de_tiempo():
             enviar_mensaje_whatsapp(telefono, mensaje_advertencia)
             c.execute("UPDATE chat_sesiones SET advertido = 1 WHERE telefono = %s", (telefono,))
             
-        # 2. CIERRE Y DERIVACIÓN A LA HORA (60 MINUTOS)
         hace_1_hora = ahora - timedelta(hours=1)
         c.execute("SELECT telefono, historial FROM chat_sesiones WHERE ultima_interaccion < %s", (hace_1_hora,))
         for telefono, historial_str in c.fetchall():
             tel_10 = extraer_10_digitos(telefono)
             c.execute("SELECT numero_vendedor, tipo_campana FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,))
-            datos_asignacion = c.fetchone()
+            res_vend = c.fetchone()
+            vendedor_asignado = res_vend[0] if res_vend else "Sin asignar"
+            campana = res_vend[1] if res_vend else "Campaña"
             
-            if datos_asignacion:
-                vendedor_tel = datos_asignacion[0]
-                campana = datos_asignacion[1]
-                
-                historial = json.loads(historial_str)
-                ultimo_msg_cliente = "Sin mensajes recientes."
-                for msg in reversed(historial):
-                    if msg.get("role") == "user" and "CONTEXTO DE LA CAMPAÑA" not in msg.get("parts", [""])[0]:
-                        ultimo_msg_cliente = msg["parts"][0]
-                        break
+            c.execute("""
+                INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
+            """, (telefono, vendedor_asignado, historial_str, datetime.now()))
 
-                aviso_asesor = (
-                    f"🤖 *AVISO DEL BOT AUTOMÁTICO*\n\n"
-                    f"El cliente con número +{telefono} ingresó por la campaña *{campana}*, pero el chat expiró por inactividad.\n\n"
-                    f"💬 *Último mensaje del cliente:*\n\"{ultimo_msg_cliente}\"\n\n"
-                    f"👉 *Acción requerida:* Por favor, contactalo directamente para no perder la venta."
-                )
-                
-                if vendedor_tel and vendedor_tel != "5491145394279": 
-                    enviar_mensaje_whatsapp(vendedor_tel, aviso_asesor)
-                else:
-                    enviar_mensaje_whatsapp("5491145394279", aviso_asesor)
+            historial = json.loads(historial_str)
+            ultimo_msg_cliente = "Sin mensajes recientes."
+            for msg in reversed(historial):
+                if msg.get("role") == "user" and "CONTEXTO DE LA CAMPAÑA" not in msg.get("parts", [""])[0]:
+                    ultimo_msg_cliente = msg["parts"][0]
+                    break
+
+            aviso_asesor = (
+                f"🤖 *AVISO DEL BOT AUTOMÁTICO*\n\n"
+                f"El cliente con número +{telefono} ingresó por la campaña *{campana}*, pero el chat expiró por inactividad.\n\n"
+                f"💬 *Último mensaje del cliente:*\n\"{ultimo_msg_cliente}\"\n\n"
+                f"👉 *Acción requerida:* Por favor, revisa el panel de 'Chats Abandonados' en el sistema y contactalo directamente."
+            )
+            
+            if vendedor_asignado and vendedor_asignado != "Sin asignar" and vendedor_asignado != "5491145394279": 
+                enviar_mensaje_whatsapp(vendedor_asignado, aviso_asesor)
+            else:
+                enviar_mensaje_whatsapp("5491145394279", aviso_asesor)
 
             c.execute("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono,))
             
@@ -288,15 +304,31 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
         respuesta = chat.send_message(texto_entrante)
         texto_respuesta = respuesta.text
         
-        historial.append({"role": "model", "parts": [texto_respuesta]})
-        c.execute("""
-            INSERT INTO chat_sesiones (telefono, historial, ultima_interaccion, advertido) 
-            VALUES (%s, %s, %s, 0) 
-            ON CONFLICT (telefono) 
-            DO UPDATE SET historial = EXCLUDED.historial, ultima_interaccion = EXCLUDED.ultima_interaccion, advertido = 0
-        """, (telefono_cliente, json.dumps(historial), datetime.now()))
+        if "Te voy a derivar con" in texto_respuesta:
+            tel_10 = extraer_10_digitos(telefono_cliente)
+            c.execute("SELECT numero_vendedor FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,))
+            res_vend = c.fetchone()
+            vendedor_asignado = res_vend[0] if res_vend else "Sin asignar"
+            
+            historial.append({"role": "model", "parts": [texto_respuesta]})
+            
+            c.execute("""
+                INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
+            """, (telefono_cliente, vendedor_asignado, json.dumps(historial), datetime.now()))
+            
+            c.execute("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,))
+        else:
+            historial.append({"role": "model", "parts": [texto_respuesta]})
+            c.execute("""
+                INSERT INTO chat_sesiones (telefono, historial, ultima_interaccion, advertido) 
+                VALUES (%s, %s, %s, 0) 
+                ON CONFLICT (telefono) 
+                DO UPDATE SET historial = EXCLUDED.historial, ultima_interaccion = EXCLUDED.ultima_interaccion, advertido = 0
+            """, (telefono_cliente, json.dumps(historial), datetime.now()))
+            
         conn.commit()
-        
         enviar_mensaje_whatsapp(telefono_cliente, texto_respuesta)
         
     except Exception as e:
@@ -305,18 +337,12 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
     finally:
         conn.close()
 
-def enviar_mensaje_whatsapp(telefono_destino, texto):
-    url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
-    headers = {"Authorization": f"Bearer {CLOUD_API_TOKEN}", "Content-Type": "application/json"}
-    data = {"messaging_product": "whatsapp", "to": telefono_destino, "type": "text", "text": {"body": texto}}
-    requests.post(url, headers=headers, json=data)
-
 # ==========================================
 # RUTAS DEL WEBHOOK Y NUEVOS ENDPOINTS
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (PostgreSQL Activado) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (PostgreSQL) 🚀", 200
 
 @app.route('/asignar_vendedor', methods=['POST'])
 def asignar_vendedor():
@@ -409,13 +435,33 @@ def obtener_metricas():
 
         datos_nube = {}
         for fila in filas:
-            tanda_id, entregados, leidos, respondidos = fila
-            datos_nube[tanda_id] = {
-                "entregados": entregados,
-                "leidos": leidos,
-                "respondidos": respondidos
-            }
+            datos_nube[fila[0]] = {"entregados": fila[1], "leidos": fila[2], "respondidos": fila[3]}
         return jsonify(datos_nube), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/derivados', methods=['GET'])
+def obtener_derivados():
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT telefono, vendedor, historial, fecha FROM chats_derivados ORDER BY fecha DESC")
+        filas = c.fetchall()
+        conn.close()
+        
+        datos = [{"telefono": f[0], "vendedor": f[1], "historial": json.loads(f[2]), "fecha": f[3].strftime("%Y-%m-%d %H:%M:%S")} for f in filas]
+        return jsonify(datos), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/derivados/<telefono>', methods=['DELETE'])
+def borrar_derivado(telefono):
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("DELETE FROM chats_derivados WHERE telefono = %s", (telefono,))
+        conn.commit(); conn.close()
+        return jsonify({"status": "ok"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
