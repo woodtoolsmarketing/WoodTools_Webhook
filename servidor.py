@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 import requests
 import gspread
+from google.oauth2.credentials import Credentials 
 from apscheduler.schedulers.background import BackgroundScheduler
 import google.generativeai as genai
 import json
@@ -13,7 +14,7 @@ import psycopg2
 app = Flask(__name__)
 
 # ==========================================
-# CONFIGURACIÓN SEGURA
+# CONFIGURACIÓN SEGURA (Inteligente)
 # ==========================================
 posibles_rutas = [
     "/etc/secrets/tokens.json",
@@ -52,12 +53,6 @@ except Exception as e:
 genai.configure(api_key=GEMINI_API_KEY)
 NOMBRE_HOJA = "Base de datos wt"
 
-# --- RUTA PARA LA CUENTA DE SERVICIO (Para editar Google Sheets) ---
-RUTA_CREDENCIALES = "/etc/secrets/credenciales.json" if os.path.exists("/etc/secrets/credenciales.json") else "credenciales.json"
-
-# ==========================================
-# FUNCIONES BÁSICAS Y DE ENVÍO
-# ==========================================
 def limpiar_numero(num):
     return ''.join(filter(str.isdigit, str(num)))
 
@@ -87,7 +82,6 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS metricas_campanas (tanda_id TEXT PRIMARY KEY, entregados INTEGER DEFAULT 0, leidos INTEGER DEFAULT 0, respondidos INTEGER DEFAULT 0)''')
         c.execute('''CREATE TABLE IF NOT EXISTS tracking_metricas (tanda_id TEXT, telefono TEXT, evento TEXT, PRIMARY KEY(tanda_id, telefono, evento))''')
         c.execute('''CREATE TABLE IF NOT EXISTS chats_derivados (telefono TEXT PRIMARY KEY, vendedor TEXT, historial TEXT, fecha TIMESTAMP)''')
-        
         conn.commit()
         conn.close()
     except Exception as e:
@@ -125,12 +119,13 @@ def registrar_metrica(evento, telefono):
 
 def bloquear_numero_en_sheets(telefono):
     try:
-        if not os.path.exists(RUTA_CREDENCIALES):
-            print("❌ No se encontró credenciales.json para editar Google Sheets.")
+        if not ruta_correcta:
+            print("❌ No se encontró token.json para editar Google Sheets.")
             return False
             
-        # USAMOS SERVICE ACCOUNT PARA CONECTARNOS COMO BOT
-        gc = gspread.service_account(filename=RUTA_CREDENCIALES)
+        SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+        creds = Credentials.from_authorized_user_file(ruta_correcta, SCOPES)
+        gc = gspread.authorize(creds)
         sh = gc.open(NOMBRE_HOJA)
         
         for ws in sh.worksheets():
@@ -206,9 +201,6 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(func=revisar_rutinas_de_tiempo, trigger="interval", minutes=5)
 scheduler.start()
 
-# ==========================================
-# CEREBRO IA: LÓGICA CONDICIONAL DE NOMBRES
-# ==========================================
 def obtener_prompt_personalizado(telefono_cliente_completo):
     tel_10_digitos = extraer_10_digitos(telefono_cliente_completo)
     
@@ -437,6 +429,31 @@ def obtener_metricas():
         for fila in filas:
             datos_nube[fila[0]] = {"entregados": fila[1], "leidos": fila[2], "respondidos": fila[3]}
         return jsonify(datos_nube), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --- NUEVO ENDPOINT PARA EXPORTAR DATOS INDIVIDUALES A EXCEL ---
+@app.route('/tracking_general', methods=['GET'])
+def obtener_tracking_general():
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT tanda_id, telefono, evento FROM tracking_metricas")
+        filas = c.fetchall()
+        conn.close()
+
+        datos_tracking = {}
+        for tanda_id, telefono, evento in filas:
+            if tanda_id not in datos_tracking:
+                datos_tracking[tanda_id] = {}
+            
+            jerarquia = {'sent': 1, 'delivered': 2, 'read': 3, 'responded': 4}
+            evento_actual = datos_tracking[tanda_id].get(telefono, 'sent')
+            
+            if jerarquia.get(evento, 0) > jerarquia.get(evento_actual, 0):
+                datos_tracking[tanda_id][telefono] = evento
+
+        return jsonify(datos_tracking), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
