@@ -90,12 +90,12 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS chats_derivados (telefono TEXT PRIMARY KEY, vendedor TEXT, historial TEXT, fecha TIMESTAMP)''')
         conn.commit()
 
-        # MAGIA: Forzar actualización de esquema viejo (Si falta la columna 'advertido', la crea)
+        # Forzar actualización de esquema viejo
         try:
             c.execute("ALTER TABLE chat_sesiones ADD COLUMN advertido INTEGER DEFAULT 0")
             conn.commit()
         except Exception:
-            conn.rollback() # Ya existe, ignorar error
+            conn.rollback() 
             
         conn.close()
     except Exception as e:
@@ -251,6 +251,20 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
     tel_vend = res[0] if res else "5491145394279"
     tipo_camp = res[1] if res else "Promociones"
     subtipo = res[2] if res else ""
+
+    # --- NUEVA MAGIA: PYTHON RESUELVE EL NOMBRE, NO GEMINI ---
+    mapa_nombres = {
+        "5491145394279": "Valentín",
+        "5491157528428": "Emmanuel",
+        "5491134811771": "Ariel",
+        "5491165630406": "Carlos",
+        "5491164591316": "Roberto Golik",
+        "5491157528427": "Nicolas Saad",
+        "5491153455274": "Ezequiel Calvi",
+        "5491156321012": "Alan Calvi",
+        "5491168457778": "Luis Quevedo"
+    }
+    nombre_vendedor_ia = mapa_nombres.get(tel_vend, "tu asesor comercial")
     
     plantillas = {
         "Promociones": "Hola, vengo por la promoción de [herramienta] para [material] y quisiera tener más información",
@@ -276,18 +290,10 @@ Usa formato de WhatsApp (*negritas* y emojis), NUNCA uses markdown de asteriscos
 CONTEXTO DE LA CAMPAÑA:
 El cliente está respondiendo a una campaña del tipo "{tipo_camp}".
 
-REGLA DE IDENTIFICACIÓN DEL VENDEDOR (¡MUY IMPORTANTE!):
-El número de WhatsApp del vendedor asignado a este cliente es exactamente: {tel_vend}
-Aplica ESTRICTAMENTE la siguiente regla para saber cómo se llama y referirte a él:
-- Si el número es 5491145394279 el vendedor es "Valentín"
-- Si el número es 5491157528428 el vendedor es "Emmanuel"
-- Si el número es 5491134811771 el vendedor es "Ariel"
-- Si el número es 5491165630406 el vendedor es "Carlos"
-- Si el número es 5491164591316 el vendedor es "Roberto Golik"
-- Si el número es 5491157528427 el vendedor es "Nicolas Saad"
-- Si el número es 5491153455274 el vendedor es "Ezequiel Calvi"
-- Si el número es 5491156321012 el vendedor es "Alan Calvi"
-- Si el número es 5491168457778 el vendedor es "Luis Quevedo"
+EL VENDEDOR ASIGNADO:
+El vendedor asignado a este cliente se llama: {nombre_vendedor_ia}
+El número de WhatsApp de este vendedor es: {tel_vend}
+(Si el nombre es "tu asesor comercial", referite a él genéricamente de esa forma en todo momento, NO inventes ni supongas nombres bajo ninguna circunstancia).
 
 TUS REGLAS DE CHARLA (¡ESTRICTAS!):
 1. Saluda cordialmente (ESTÁ PROHIBIDO USAR LA PALABRA "CAMPAÑA").
@@ -296,13 +302,13 @@ TUS REGLAS DE CHARLA (¡ESTRICTAS!):
    - Si la frase NO tiene corchetes o solo pide [Vendedor], NO preguntes por herramientas.
 3. REGLA DE HIERRO: NO respondes NADA que salga de tu objetivo. NO das precios, NO hablas de envíos, NO das información de stock, NO haces asesoría técnica.
 4. ¿QUÉ HACER SI PREGUNTAN OTRA COSA?: Si el cliente hace CUALQUIER pregunta técnica o comercial fuera de decirte qué herramienta/material usa, CORTAS EL CHAT respondiendo EXACTAMENTE esto:
-   "Esa es una gran pregunta técnica. Te voy a derivar con [Nombre del Vendedor], tu asesor comercial, para que te brinde esa información precisa. Hacé clic en este enlace para hablar con él 👉 https://wa.me/{tel_vend}?text=Hola,%20tengo%20una%20consulta"
+   "Esa es una gran pregunta técnica. Te voy a derivar con {nombre_vendedor_ia} para que te brinde esa información precisa. Hacé clic en este enlace para hablar con él 👉 https://wa.me/{tel_vend}?text=Hola,%20tengo%20una%20consulta"
    (No respondas nada más, solo esa derivación).
-5. CIERRE NORMAL: Una vez que el cliente te dé el material y la herramienta (o los datos que pediste), dile que [Nombre del Vendedor] lo va a ayudar, despídete y mándale el link con la frase completa.
+5. CIERRE NORMAL: Una vez que el cliente te dé el material y la herramienta (o los datos que pediste), dile que {nombre_vendedor_ia} lo va a ayudar, despídete y mándale el link con la frase completa.
 
 FORMATO DEL LINK A WHATSAPP PARA EL CIERRE:
 - Reemplaza [herramienta] y [material] con lo que te pidió.
-- Si la frase incluye [Vendedor], reemplázalo con el nombre que dedujiste.
+- Si la frase incluye [Vendedor], reemplázalo con {nombre_vendedor_ia}.
 - Codifica los espacios con '%20'.
 El link EXACTO debe construirse así:
 https://wa.me/{tel_vend}?text=[FRASE_COMPLETADA_Y_CODIFICADA]
