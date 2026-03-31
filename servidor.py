@@ -165,7 +165,7 @@ def bloquear_numero_en_sheets(telefono):
     except Exception as e: print(f"❌ Error conectando a Sheets: {e}", flush=True)
 
 # ==========================================
-# RUTINAS AISLADAS CON POOL (MODIFICADO)
+# RUTINAS AISLADAS CON POOL
 # ==========================================
 def revisar_rutinas_de_tiempo():
     try:
@@ -178,8 +178,6 @@ def revisar_rutinas_de_tiempo():
             for msg_id, telefono in para_borrar:
                 bloquear_numero_en_sheets(telefono)
                 execute_db_query("DELETE FROM mensajes WHERE id=%s", (msg_id,), commit=True)
-            
-        # (SE ELIMINÓ EL BLOQUE MOLESTO DE LOS 50 MINUTOS)
             
         # --- BLOQUE 2: CIERRE EXACTO A LOS 60 MINUTOS ---
         hace_1_hora = ahora - timedelta(hours=1)
@@ -206,7 +204,6 @@ def revisar_rutinas_de_tiempo():
                             ultimo_msg_cliente = msg["parts"][0]
                             break
 
-                    # 1. Le avisamos al Vendedor en silencio
                     aviso_asesor = (
                         f"🤖 *AVISO DEL BOT AUTOMÁTICO*\n\n"
                         f"El cliente con número +{telefono} ingresó por la campaña *{campana}*, pero el chat expiró tras 1 hora de inactividad.\n\n"
@@ -219,11 +216,9 @@ def revisar_rutinas_de_tiempo():
                     else:
                         enviar_mensaje_whatsapp("5491145394279", aviso_asesor)
 
-                    # 2. ÚNICO MENSAJE DE CIERRE AL CLIENTE
                     aviso_cliente = "⚠️ ¡Hola! Como pasó 1 hora de inactividad, cerramos esta conversación automática. Tu asesor asignado se pondrá en contacto con vos a la brevedad para continuar atendiéndote de forma personalizada. ¡Gracias!"
                     enviar_mensaje_whatsapp(telefono, aviso_cliente)
 
-                    # 3. Cerramos el chat en la base de datos
                     execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono,), commit=True)
                 except Exception as inner_e:
                     print(f"Fallo derivando chat {telefono}: {inner_e}")
@@ -236,14 +231,18 @@ scheduler.add_job(func=revisar_rutinas_de_tiempo, trigger="interval", minutes=5)
 scheduler.start()
 
 # ==========================================
-# CEREBRO IA: LÓGICA CONDICIONAL DE NOMBRES
+# CEREBRO IA: LÓGICA CONDICIONAL DE NOMBRES (REVISADA)
 # ==========================================
 def obtener_prompt_personalizado(telefono_cliente_completo):
     tel_10_digitos = extraer_10_digitos(telefono_cliente_completo)
     
     res = execute_db_query("SELECT numero_vendedor, tipo_campana, subtipo FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10_digitos,), fetchone=True)
 
-    tel_vend = res[0] if res else "5491145394279"
+    # Verificamos si hay un vendedor válido guardado
+    numero_db = res[0] if res else None
+    if numero_db in ["0", "", "Sin asignar", None]:
+        numero_db = None
+
     tipo_camp = res[1] if res else "Promociones"
     subtipo = res[2] if res else ""
 
@@ -258,7 +257,15 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
         "5491156321012": "Alan Calvi",
         "5491168457778": "Luis Quevedo"
     }
-    nombre_vendedor_ia = mapa_nombres.get(tel_vend, "tu asesor comercial")
+    
+    # Lógica estricta: Solo damos nombre si el número está en el mapa
+    if numero_db and numero_db in mapa_nombres:
+        nombre_vendedor_ia = mapa_nombres[numero_db]
+        tel_vend = numero_db
+    else:
+        # Modo genérico (sin nombre propio)
+        nombre_vendedor_ia = "tu asesor"
+        tel_vend = "5491145394279" # Link de WhatsApp por defecto
     
     plantillas = {
         "Promociones": "Hola, vengo por la promoción de [herramienta] para [material] y quisiera tener más información",
@@ -287,7 +294,7 @@ El cliente está respondiendo a una campaña del tipo "{tipo_camp}".
 EL VENDEDOR ASIGNADO:
 El vendedor asignado a este cliente se llama: {nombre_vendedor_ia}
 El número de WhatsApp de este vendedor es: {tel_vend}
-(Si el nombre es "tu asesor comercial", referite a él genéricamente de esa forma en todo momento, NO inventes ni supongas nombres bajo ninguna circunstancia).
+(MUY IMPORTANTE: Si el nombre es "tu asesor", referite a él genéricamente de esa forma en todo momento. NUNCA inventes ni supongas nombres propios. Por ejemplo, debes decir "Así le avisamos a tu asesor" y JAMÁS "Así le avisamos a Valentín").
 
 TUS REGLAS DE CHARLA (¡ESTRICTAS!):
 1. Saluda cordialmente (ESTÁ PROHIBIDO USAR LA PALABRA "CAMPAÑA").
