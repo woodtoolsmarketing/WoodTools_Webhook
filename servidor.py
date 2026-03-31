@@ -53,7 +53,7 @@ except Exception as e:
 genai.configure(api_key=GEMINI_API_KEY)
 NOMBRE_HOJA = "Base de datos wt"
 
-# --- RUTA PARA LA CUENTA DE SERVICIO (Para editar Google Sheets) ---
+# --- RUTA PARA LA CUENTA DE SERVICIO ---
 RUTA_CREDENCIALES = "/etc/secrets/credenciales.json" if os.path.exists("/etc/secrets/credenciales.json") else "credenciales.json"
 
 # ==========================================
@@ -83,13 +83,20 @@ def init_db():
         conn = get_db()
         c = conn.cursor()
         c.execute('''CREATE TABLE IF NOT EXISTS mensajes (id TEXT PRIMARY KEY, telefono TEXT, estado TEXT, fecha TIMESTAMP)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS chat_sesiones (telefono TEXT PRIMARY KEY, historial TEXT, ultima_interaccion TIMESTAMP, advertido INTEGER DEFAULT 0)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS chat_sesiones (telefono TEXT PRIMARY KEY, historial TEXT, ultima_interaccion TIMESTAMP)''')
         c.execute('''CREATE TABLE IF NOT EXISTS asignaciones_v2 (telefono_cliente TEXT PRIMARY KEY, numero_vendedor TEXT, tipo_campana TEXT, subtipo TEXT, tanda_id TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS metricas_campanas (tanda_id TEXT PRIMARY KEY, entregados INTEGER DEFAULT 0, leidos INTEGER DEFAULT 0, respondidos INTEGER DEFAULT 0)''')
         c.execute('''CREATE TABLE IF NOT EXISTS tracking_metricas (tanda_id TEXT, telefono TEXT, evento TEXT, PRIMARY KEY(tanda_id, telefono, evento))''')
         c.execute('''CREATE TABLE IF NOT EXISTS chats_derivados (telefono TEXT PRIMARY KEY, vendedor TEXT, historial TEXT, fecha TIMESTAMP)''')
-        
         conn.commit()
+
+        # MAGIA: Forzar actualización de esquema viejo (Si falta la columna 'advertido', la crea)
+        try:
+            c.execute("ALTER TABLE chat_sesiones ADD COLUMN advertido INTEGER DEFAULT 0")
+            conn.commit()
+        except Exception:
+            conn.rollback() # Ya existe, ignorar error
+            
         conn.close()
     except Exception as e:
         print(f"Error crítico conectando a PostgreSQL al iniciar: {e}")
@@ -127,7 +134,6 @@ def registrar_metrica(evento, telefono):
 def bloquear_numero_en_sheets(telefono):
     try:
         if not os.path.exists(RUTA_CREDENCIALES):
-            print("❌ No se encontró credenciales.json para editar Google Sheets.")
             return False
             
         gc = gspread.service_account(filename=RUTA_CREDENCIALES)
@@ -138,14 +144,12 @@ def bloquear_numero_en_sheets(telefono):
                 celda = ws.find(telefono)
                 if celda:
                     ws.update_cell(celda.row, celda.col, f"0000{telefono}")
-                    print(f"✅ Número {telefono} bloqueado exitosamente en Sheets.")
                     return True
             except gspread.exceptions.CellNotFound: continue
     except Exception as e: print(f"❌ Error conectando a Sheets: {e}", flush=True)
 
-
 # ==========================================
-# CORRECCIÓN ANTI-REPETICIÓN (RUTINAS DE TIEMPO AISLADAS)
+# RUTINAS AISLADAS (NO SE CUELGAN MÁS)
 # ==========================================
 def revisar_rutinas_de_tiempo():
     try:
@@ -153,18 +157,15 @@ def revisar_rutinas_de_tiempo():
         c = conn.cursor()
         ahora = datetime.now()
         
-        # --- BLOQUE 1: 48 HS ---
+        # --- BLOQUE 1: Borrar de Sheets si falla por 48hs ---
         try:
             hace_48_horas = ahora - timedelta(hours=48)
             c.execute("SELECT id, telefono FROM mensajes WHERE estado='sent' AND fecha < %s", (hace_48_horas,))
-            para_borrar = c.fetchall()
-            for msg_id, telefono in para_borrar:
+            for msg_id, telefono in c.fetchall():
                 bloquear_numero_en_sheets(telefono)
                 c.execute("DELETE FROM mensajes WHERE id=%s", (msg_id,))
             conn.commit()
-        except Exception as e:
-            print(f"Error en bloque 48hs: {e}")
-            conn.rollback()
+        except Exception: conn.rollback()
             
         # --- BLOQUE 2: ADVERTENCIA 50 MINUTOS ---
         try:
@@ -172,13 +173,15 @@ def revisar_rutinas_de_tiempo():
             c.execute("SELECT telefono FROM chat_sesiones WHERE ultima_interaccion < %s AND advertido = 0", (hace_50_minutos,))
             para_advertir = c.fetchall()
             for (telefono,) in para_advertir:
-                mensaje_advertencia = "⚠️ ¡Hola! Por cuestiones de seguridad, en 10 minutos se cerrará esta conversación automática. Si no me respondés, te derivaré directamente con tu asesor asignado para que te contacte y continúe atendiéndote. ¿Pudiste revisar lo que te comenté?"
-                enviar_mensaje_whatsapp(telefono, mensaje_advertencia)
-                c.execute("UPDATE chat_sesiones SET advertido = 1 WHERE telefono = %s", (telefono,))
-            conn.commit()  # <-- ACÁ ESTÁ LA MAGIA: Guarda instantáneamente para no repetirse
-        except Exception as e:
-            print(f"Error en bloque 50min: {e}")
-            conn.rollback()
+                try:
+                    mensaje_advertencia = "⚠️ ¡Hola! Por cuestiones de seguridad, en 10 minutos se cerrará esta conversación automática. Si no me respondés, te derivaré directamente con tu asesor asignado para que te contacte y continúe atendiéndote. ¿Pudiste revisar lo que te comenté?"
+                    enviar_mensaje_whatsapp(telefono, mensaje_advertencia)
+                    c.execute("UPDATE chat_sesiones SET advertido = 1 WHERE telefono = %s", (telefono,))
+                    conn.commit() # GUARDADO INSTANTÁNEO INDIVIDUAL
+                except Exception as inner_e:
+                    print(f"Fallo individual 50m {telefono}: {inner_e}")
+                    conn.rollback()
+        except Exception: conn.rollback()
             
         # --- BLOQUE 3: CIERRE 60 MINUTOS ---
         try:
@@ -219,16 +222,15 @@ def revisar_rutinas_de_tiempo():
                         enviar_mensaje_whatsapp("5491145394279", aviso_asesor)
 
                     c.execute("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono,))
+                    conn.commit() # GUARDADO INSTANTÁNEO INDIVIDUAL
                 except Exception as inner_e:
-                    print(f"Error procesando derivacion {telefono}: {inner_e}")
-            conn.commit()
-        except Exception as e:
-            print(f"Error en bloque 60min: {e}")
-            conn.rollback()
+                    print(f"Fallo derivando chat {telefono}: {inner_e}")
+                    conn.rollback()
+        except Exception: conn.rollback()
 
         conn.close()
     except Exception as e:
-        print(f"Error general en rutinas: {e}")
+        print(f"Error general en rutinas de tiempo: {e}")
 
 scheduler = BackgroundScheduler()
 scheduler.add_job(func=revisar_rutinas_de_tiempo, trigger="interval", minutes=5)
@@ -321,7 +323,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
     else:
         historial = [
             {"role": "user", "parts": [prompt_dinamico]},
-            {"role": "model", "parts": ["Entendido. Aplicaré las reglas de forma hiper estricta. Si me hacen preguntas fuera de mi alcance, derivaré immediately al vendedor sin responder la duda técnica."]}
+            {"role": "model", "parts": ["Entendido. Aplicaré las reglas de forma hiper estricta."]}
         ]
         
     historial.append({"role": "user", "parts": [texto_entrante]})
@@ -481,10 +483,8 @@ def obtener_tracking_general():
         for tanda_id, telefono, evento in filas:
             if tanda_id not in datos_tracking:
                 datos_tracking[tanda_id] = {}
-            
             jerarquia = {'sent': 1, 'delivered': 2, 'read': 3, 'responded': 4}
             evento_actual = datos_tracking[tanda_id].get(telefono, 'sent')
-            
             if jerarquia.get(evento, 0) > jerarquia.get(evento_actual, 0):
                 datos_tracking[tanda_id][telefono] = evento
 
