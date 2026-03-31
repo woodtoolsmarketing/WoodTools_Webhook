@@ -10,6 +10,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import google.generativeai as genai
 import json
 import psycopg2 
+# --- NUEVA LIBRERÍA PARA MANEJAR CONEXIONES MÚLTIPLES ---
+from psycopg2 import pool 
 
 app = Flask(__name__)
 
@@ -52,9 +54,65 @@ except Exception as e:
 
 genai.configure(api_key=GEMINI_API_KEY)
 NOMBRE_HOJA = "Base de datos wt"
-
-# --- RUTA PARA LA CUENTA DE SERVICIO ---
 RUTA_CREDENCIALES = "/etc/secrets/credenciales.json" if os.path.exists("/etc/secrets/credenciales.json") else "credenciales.json"
+
+# ==========================================
+# MAGIA ANTI-CHOQUES: POOL DE CONEXIONES A LA NUBE
+# ==========================================
+db_pool = None
+try:
+    # Creamos un "estacionamiento" de 1 a 10 conexiones simultáneas
+    db_pool = psycopg2.pool.SimpleConnectionPool(1, 10, DATABASE_URL, sslmode='require')
+    if db_pool:
+        print("✅ Pool de conexiones a PostgreSQL creado exitosamente.")
+except Exception as e:
+    print(f"❌ Error al conectar a PostgreSQL: {e}")
+
+# Nueva función segura para pedir una conexión
+def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=False):
+    if not db_pool:
+        print("❌ No hay pool de conexiones disponible.")
+        return None
+        
+    conn = db_pool.getconn() # Pedimos un turno
+    res = None
+    try:
+        with conn.cursor() as c:
+            c.execute(query, params)
+            if commit:
+                conn.commit()
+            if fetchone:
+                res = c.fetchone()
+            if fetchall:
+                res = c.fetchall()
+            # Si fue un INSERT/UPDATE y pedimos saber cuántas filas afectó
+            if not fetchone and not fetchall and not commit:
+                res = c.rowcount
+    except Exception as e:
+        print(f"Error en DB ejecutando '{query}': {e}")
+        conn.rollback()
+    finally:
+        db_pool.putconn(conn) # Devolvemos el turno siempre
+    return res
+
+def init_db():
+    try:
+        execute_db_query('''CREATE TABLE IF NOT EXISTS mensajes (id TEXT PRIMARY KEY, telefono TEXT, estado TEXT, fecha TIMESTAMP)''', commit=True)
+        execute_db_query('''CREATE TABLE IF NOT EXISTS chat_sesiones (telefono TEXT PRIMARY KEY, historial TEXT, ultima_interaccion TIMESTAMP)''', commit=True)
+        execute_db_query('''CREATE TABLE IF NOT EXISTS asignaciones_v2 (telefono_cliente TEXT PRIMARY KEY, numero_vendedor TEXT, tipo_campana TEXT, subtipo TEXT, tanda_id TEXT)''', commit=True)
+        execute_db_query('''CREATE TABLE IF NOT EXISTS metricas_campanas (tanda_id TEXT PRIMARY KEY, entregados INTEGER DEFAULT 0, leidos INTEGER DEFAULT 0, respondidos INTEGER DEFAULT 0)''', commit=True)
+        execute_db_query('''CREATE TABLE IF NOT EXISTS tracking_metricas (tanda_id TEXT, telefono TEXT, evento TEXT, PRIMARY KEY(tanda_id, telefono, evento))''', commit=True)
+        execute_db_query('''CREATE TABLE IF NOT EXISTS chats_derivados (telefono TEXT PRIMARY KEY, vendedor TEXT, historial TEXT, fecha TIMESTAMP)''', commit=True)
+        
+        # Forzar actualización de esquema viejo
+        try:
+            execute_db_query("ALTER TABLE chat_sesiones ADD COLUMN advertido INTEGER DEFAULT 0", commit=True)
+        except Exception: pass # Ya existe
+            
+    except Exception as e:
+        print(f"Error crítico iniciando tablas: {e}")
+
+init_db()
 
 # ==========================================
 # FUNCIONES BÁSICAS Y DE ENVÍO
@@ -72,63 +130,29 @@ def enviar_mensaje_whatsapp(telefono_destino, texto):
     data = {"messaging_product": "whatsapp", "to": telefono_destino, "type": "text", "text": {"body": texto}}
     requests.post(url, headers=headers, json=data)
 
-# ==========================================
-# BASE DE DATOS EN LA NUBE (PostgreSQL)
-# ==========================================
-def get_db():
-    return psycopg2.connect(DATABASE_URL, sslmode='require')
-
-def init_db():
-    try:
-        conn = get_db()
-        c = conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS mensajes (id TEXT PRIMARY KEY, telefono TEXT, estado TEXT, fecha TIMESTAMP)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS chat_sesiones (telefono TEXT PRIMARY KEY, historial TEXT, ultima_interaccion TIMESTAMP)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS asignaciones_v2 (telefono_cliente TEXT PRIMARY KEY, numero_vendedor TEXT, tipo_campana TEXT, subtipo TEXT, tanda_id TEXT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS metricas_campanas (tanda_id TEXT PRIMARY KEY, entregados INTEGER DEFAULT 0, leidos INTEGER DEFAULT 0, respondidos INTEGER DEFAULT 0)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS tracking_metricas (tanda_id TEXT, telefono TEXT, evento TEXT, PRIMARY KEY(tanda_id, telefono, evento))''')
-        c.execute('''CREATE TABLE IF NOT EXISTS chats_derivados (telefono TEXT PRIMARY KEY, vendedor TEXT, historial TEXT, fecha TIMESTAMP)''')
-        conn.commit()
-
-        # Forzar actualización de esquema viejo
-        try:
-            c.execute("ALTER TABLE chat_sesiones ADD COLUMN advertido INTEGER DEFAULT 0")
-            conn.commit()
-        except Exception:
-            conn.rollback() 
-            
-        conn.close()
-    except Exception as e:
-        print(f"Error crítico conectando a PostgreSQL al iniciar: {e}")
-
-init_db()
-
 def registrar_metrica(evento, telefono):
     try:
         tel_10 = extraer_10_digitos(telefono)
-        conn = get_db()
-        c = conn.cursor()
-        
-        c.execute("SELECT tanda_id FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,))
-        res = c.fetchone()
+        res = execute_db_query("SELECT tanda_id FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), fetchone=True)
         
         if res and res[0]:
             t_id = res[0]
-            c.execute("""
+            # Usamos el pool para el INSERT
+            filas_afectadas = execute_db_query("""
                 INSERT INTO tracking_metricas (tanda_id, telefono, evento) 
                 VALUES (%s, %s, %s) 
                 ON CONFLICT (tanda_id, telefono, evento) DO NOTHING
-            """, (t_id, tel_10, evento))
+            """, (t_id, tel_10, evento), commit=True)
             
-            if c.rowcount > 0:
-                if evento == 'delivered':
-                    c.execute("UPDATE metricas_campanas SET entregados = entregados + 1 WHERE tanda_id = %s", (t_id,))
-                elif evento == 'read':
-                    c.execute("UPDATE metricas_campanas SET leidos = leidos + 1 WHERE tanda_id = %s", (t_id,))
-                elif evento == 'responded':
-                    c.execute("UPDATE metricas_campanas SET respondidos = respondidos + 1 WHERE tanda_id = %s", (t_id,))
+            # Si el Execute_db_query con commit no devuelve rowcount, lo calculamos manualmente o asumimos
+            # Para simplificar y evitar fallos, forzamos los contadores si el insert no dio error
+            if evento == 'delivered':
+                execute_db_query("UPDATE metricas_campanas SET entregados = entregados + 1 WHERE tanda_id = %s", (t_id,), commit=True)
+            elif evento == 'read':
+                execute_db_query("UPDATE metricas_campanas SET leidos = leidos + 1 WHERE tanda_id = %s", (t_id,), commit=True)
+            elif evento == 'responded':
+                execute_db_query("UPDATE metricas_campanas SET respondidos = respondidos + 1 WHERE tanda_id = %s", (t_id,), commit=True)
                 
-        conn.commit(); conn.close()
     except Exception as e: print(f"Error métricas: {e}")
 
 def bloquear_numero_en_sheets(telefono):
@@ -149,58 +173,49 @@ def bloquear_numero_en_sheets(telefono):
     except Exception as e: print(f"❌ Error conectando a Sheets: {e}", flush=True)
 
 # ==========================================
-# RUTINAS AISLADAS (NO SE CUELGAN MÁS)
+# RUTINAS AISLADAS CON POOL
 # ==========================================
 def revisar_rutinas_de_tiempo():
     try:
-        conn = get_db()
-        c = conn.cursor()
         ahora = datetime.now()
         
         # --- BLOQUE 1: Borrar de Sheets si falla por 48hs ---
-        try:
-            hace_48_horas = ahora - timedelta(hours=48)
-            c.execute("SELECT id, telefono FROM mensajes WHERE estado='sent' AND fecha < %s", (hace_48_horas,))
-            for msg_id, telefono in c.fetchall():
+        hace_48_horas = ahora - timedelta(hours=48)
+        para_borrar = execute_db_query("SELECT id, telefono FROM mensajes WHERE estado='sent' AND fecha < %s", (hace_48_horas,), fetchall=True)
+        if para_borrar:
+            for msg_id, telefono in para_borrar:
                 bloquear_numero_en_sheets(telefono)
-                c.execute("DELETE FROM mensajes WHERE id=%s", (msg_id,))
-            conn.commit()
-        except Exception: conn.rollback()
+                execute_db_query("DELETE FROM mensajes WHERE id=%s", (msg_id,), commit=True)
             
         # --- BLOQUE 2: ADVERTENCIA 50 MINUTOS ---
-        try:
-            hace_50_minutos = ahora - timedelta(minutes=50)
-            c.execute("SELECT telefono FROM chat_sesiones WHERE ultima_interaccion < %s AND advertido = 0", (hace_50_minutos,))
-            para_advertir = c.fetchall()
+        hace_50_minutos = ahora - timedelta(minutes=50)
+        para_advertir = execute_db_query("SELECT telefono FROM chat_sesiones WHERE ultima_interaccion < %s AND advertido = 0", (hace_50_minutos,), fetchall=True)
+        if para_advertir:
             for (telefono,) in para_advertir:
                 try:
                     mensaje_advertencia = "⚠️ ¡Hola! Por cuestiones de seguridad, en 10 minutos se cerrará esta conversación automática. Si no me respondés, te derivaré directamente con tu asesor asignado para que te contacte y continúe atendiéndote. ¿Pudiste revisar lo que te comenté?"
                     enviar_mensaje_whatsapp(telefono, mensaje_advertencia)
-                    c.execute("UPDATE chat_sesiones SET advertido = 1 WHERE telefono = %s", (telefono,))
-                    conn.commit() # GUARDADO INSTANTÁNEO INDIVIDUAL
+                    execute_db_query("UPDATE chat_sesiones SET advertido = 1 WHERE telefono = %s", (telefono,), commit=True)
                 except Exception as inner_e:
                     print(f"Fallo individual 50m {telefono}: {inner_e}")
-                    conn.rollback()
-        except Exception: conn.rollback()
             
         # --- BLOQUE 3: CIERRE 60 MINUTOS ---
-        try:
-            hace_1_hora = ahora - timedelta(hours=1)
-            c.execute("SELECT telefono, historial FROM chat_sesiones WHERE ultima_interaccion < %s", (hace_1_hora,))
-            para_derivar = c.fetchall()
+        hace_1_hora = ahora - timedelta(hours=1)
+        para_derivar = execute_db_query("SELECT telefono, historial FROM chat_sesiones WHERE ultima_interaccion < %s", (hace_1_hora,), fetchall=True)
+        if para_derivar:
             for telefono, historial_str in para_derivar:
                 try:
                     tel_10 = extraer_10_digitos(telefono)
-                    c.execute("SELECT numero_vendedor, tipo_campana FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,))
-                    res_vend = c.fetchone()
+                    res_vend = execute_db_query("SELECT numero_vendedor, tipo_campana FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), fetchone=True)
+                    
                     vendedor_asignado = res_vend[0] if res_vend else "Sin asignar"
                     campana = res_vend[1] if res_vend else "Campaña"
                     
-                    c.execute("""
+                    execute_db_query("""
                         INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
                         VALUES (%s, %s, %s, %s)
                         ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
-                    """, (telefono, vendedor_asignado, historial_str, datetime.now()))
+                    """, (telefono, vendedor_asignado, historial_str, datetime.now()), commit=True)
 
                     historial = json.loads(historial_str)
                     ultimo_msg_cliente = "Sin mensajes recientes."
@@ -221,14 +236,10 @@ def revisar_rutinas_de_tiempo():
                     else:
                         enviar_mensaje_whatsapp("5491145394279", aviso_asesor)
 
-                    c.execute("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono,))
-                    conn.commit() # GUARDADO INSTANTÁNEO INDIVIDUAL
+                    execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono,), commit=True)
                 except Exception as inner_e:
                     print(f"Fallo derivando chat {telefono}: {inner_e}")
-                    conn.rollback()
-        except Exception: conn.rollback()
 
-        conn.close()
     except Exception as e:
         print(f"Error general en rutinas de tiempo: {e}")
 
@@ -242,17 +253,12 @@ scheduler.start()
 def obtener_prompt_personalizado(telefono_cliente_completo):
     tel_10_digitos = extraer_10_digitos(telefono_cliente_completo)
     
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("SELECT numero_vendedor, tipo_campana, subtipo FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10_digitos,))
-    res = c.fetchone()
-    conn.close()
+    res = execute_db_query("SELECT numero_vendedor, tipo_campana, subtipo FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10_digitos,), fetchone=True)
 
     tel_vend = res[0] if res else "5491145394279"
     tipo_camp = res[1] if res else "Promociones"
     subtipo = res[2] if res else ""
 
-    # --- NUEVA MAGIA: PYTHON RESUELVE EL NOMBRE, NO GEMINI ---
     mapa_nombres = {
         "5491145394279": "Valentín",
         "5491157528428": "Emmanuel",
@@ -315,10 +321,7 @@ https://wa.me/{tel_vend}?text=[FRASE_COMPLETADA_Y_CODIFICADA]
 """
 
 def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("SELECT historial FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,))
-    resultado = c.fetchone()
+    resultado = execute_db_query("SELECT historial FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), fetchone=True)
     
     prompt_dinamico = obtener_prompt_personalizado(telefono_cliente)
     
@@ -342,43 +345,39 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
         
         if "Te voy a derivar con" in texto_respuesta:
             tel_10 = extraer_10_digitos(telefono_cliente)
-            c.execute("SELECT numero_vendedor FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,))
-            res_vend = c.fetchone()
+            res_vend = execute_db_query("SELECT numero_vendedor FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), fetchone=True)
             vendedor_asignado = res_vend[0] if res_vend else "Sin asignar"
             
             historial.append({"role": "model", "parts": [texto_respuesta]})
             
-            c.execute("""
+            execute_db_query("""
                 INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
                 VALUES (%s, %s, %s, %s)
                 ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
-            """, (telefono_cliente, vendedor_asignado, json.dumps(historial), datetime.now()))
+            """, (telefono_cliente, vendedor_asignado, json.dumps(historial), datetime.now()), commit=True)
             
-            c.execute("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,))
+            execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), commit=True)
         else:
             historial.append({"role": "model", "parts": [texto_respuesta]})
-            c.execute("""
+            execute_db_query("""
                 INSERT INTO chat_sesiones (telefono, historial, ultima_interaccion, advertido) 
                 VALUES (%s, %s, %s, 0) 
                 ON CONFLICT (telefono) 
                 DO UPDATE SET historial = EXCLUDED.historial, ultima_interaccion = EXCLUDED.ultima_interaccion, advertido = 0
-            """, (telefono_cliente, json.dumps(historial), datetime.now()))
+            """, (telefono_cliente, json.dumps(historial), datetime.now()), commit=True)
             
-        conn.commit()
         enviar_mensaje_whatsapp(telefono_cliente, texto_respuesta)
         
     except Exception as e:
         print(f"Error con Gemini: {e}")
         enviar_mensaje_whatsapp(telefono_cliente, f"🤖 ERROR TÉCNICO: {e}")
-    finally:
-        conn.close()
 
 # ==========================================
 # RUTAS DEL WEBHOOK Y NUEVOS ENDPOINTS
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (PostgreSQL) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (PostgreSQL Pool) 🚀", 200
 
 @app.route('/asignar_vendedor', methods=['POST'])
 def asignar_vendedor():
@@ -390,23 +389,20 @@ def asignar_vendedor():
     tanda_id = data.get('tanda_id', '')
     
     if telefono_cliente_10 and numero_vendedor:
-        conn = get_db()
-        c = conn.cursor()
-        c.execute("""
+        execute_db_query("""
             INSERT INTO asignaciones_v2 (telefono_cliente, numero_vendedor, tipo_campana, subtipo, tanda_id) 
             VALUES (%s, %s, %s, %s, %s) 
             ON CONFLICT (telefono_cliente) 
             DO UPDATE SET numero_vendedor=EXCLUDED.numero_vendedor, tipo_campana=EXCLUDED.tipo_campana, subtipo=EXCLUDED.subtipo, tanda_id=EXCLUDED.tanda_id
-        """, (telefono_cliente_10, numero_vendedor, tipo_campana, subtipo, tanda_id))
+        """, (telefono_cliente_10, numero_vendedor, tipo_campana, subtipo, tanda_id), commit=True)
         
         if tanda_id:
-            c.execute("""
+            execute_db_query("""
                 INSERT INTO metricas_campanas (tanda_id, entregados, leidos, respondidos) 
                 VALUES (%s, 0, 0, 0) 
                 ON CONFLICT (tanda_id) DO NOTHING
-            """, (tanda_id,))
+            """, (tanda_id,), commit=True)
             
-        conn.commit(); conn.close()
         return jsonify({"status": "asignado"}), 200
     return jsonify({"error": "faltan datos"}), 400
 
@@ -442,20 +438,17 @@ def recibir_notificaciones():
                 
                 registrar_metrica(estado, telefono) 
                 
-                conn = get_db()
-                c = conn.cursor()
                 if estado == 'sent':
-                    c.execute("""
+                    execute_db_query("""
                         INSERT INTO mensajes (id, telefono, estado, fecha) 
                         VALUES (%s, %s, %s, %s) 
                         ON CONFLICT (id) DO UPDATE SET estado=EXCLUDED.estado, fecha=EXCLUDED.fecha
-                    """, (msg_id, telefono, estado, datetime.now()))
+                    """, (msg_id, telefono, estado, datetime.now()), commit=True)
                 elif estado in ['delivered', 'read']:
-                    c.execute("DELETE FROM mensajes WHERE id=%s", (msg_id,))
+                    execute_db_query("DELETE FROM mensajes WHERE id=%s", (msg_id,), commit=True)
                 elif estado == 'failed':
                     bloquear_numero_en_sheets(telefono)
-                    c.execute("DELETE FROM mensajes WHERE id=%s", (msg_id,))
-                conn.commit(); conn.close()
+                    execute_db_query("DELETE FROM mensajes WHERE id=%s", (msg_id,), commit=True)
                 
         except Exception as e: pass
     return jsonify({"status": "ok"}), 200
@@ -463,11 +456,8 @@ def recibir_notificaciones():
 @app.route('/metricas', methods=['GET'])
 def obtener_metricas():
     try:
-        conn = get_db()
-        c = conn.cursor()
-        c.execute("SELECT tanda_id, entregados, leidos, respondidos FROM metricas_campanas")
-        filas = c.fetchall()
-        conn.close()
+        filas = execute_db_query("SELECT tanda_id, entregados, leidos, respondidos FROM metricas_campanas", fetchall=True)
+        if filas is None: return jsonify({}), 200
 
         datos_nube = {}
         for fila in filas:
@@ -479,11 +469,8 @@ def obtener_metricas():
 @app.route('/tracking_general', methods=['GET'])
 def obtener_tracking_general():
     try:
-        conn = get_db()
-        c = conn.cursor()
-        c.execute("SELECT tanda_id, telefono, evento FROM tracking_metricas")
-        filas = c.fetchall()
-        conn.close()
+        filas = execute_db_query("SELECT tanda_id, telefono, evento FROM tracking_metricas", fetchall=True)
+        if filas is None: return jsonify({}), 200
 
         datos_tracking = {}
         for tanda_id, telefono, evento in filas:
@@ -501,11 +488,8 @@ def obtener_tracking_general():
 @app.route('/derivados', methods=['GET'])
 def obtener_derivados():
     try:
-        conn = get_db()
-        c = conn.cursor()
-        c.execute("SELECT telefono, vendedor, historial, fecha FROM chats_derivados ORDER BY fecha DESC")
-        filas = c.fetchall()
-        conn.close()
+        filas = execute_db_query("SELECT telefono, vendedor, historial, fecha FROM chats_derivados ORDER BY fecha DESC", fetchall=True)
+        if filas is None: return jsonify([]), 200
         
         datos = [{"telefono": f[0], "vendedor": f[1], "historial": json.loads(f[2]), "fecha": f[3].strftime("%Y-%m-%d %H:%M:%S")} for f in filas]
         return jsonify(datos), 200
@@ -515,10 +499,7 @@ def obtener_derivados():
 @app.route('/derivados/<telefono>', methods=['DELETE'])
 def borrar_derivado(telefono):
     try:
-        conn = get_db()
-        c = conn.cursor()
-        c.execute("DELETE FROM chats_derivados WHERE telefono = %s", (telefono,))
-        conn.commit(); conn.close()
+        execute_db_query("DELETE FROM chats_derivados WHERE telefono = %s", (telefono,), commit=True)
         return jsonify({"status": "ok"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
