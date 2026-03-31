@@ -10,7 +10,6 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import google.generativeai as genai
 import json
 import psycopg2 
-# --- NUEVA LIBRERÍA PARA MANEJAR CONEXIONES MÚLTIPLES ---
 from psycopg2 import pool 
 
 app = Flask(__name__)
@@ -61,20 +60,18 @@ RUTA_CREDENCIALES = "/etc/secrets/credenciales.json" if os.path.exists("/etc/sec
 # ==========================================
 db_pool = None
 try:
-    # Creamos un "estacionamiento" de 1 a 10 conexiones simultáneas
     db_pool = psycopg2.pool.SimpleConnectionPool(1, 10, DATABASE_URL, sslmode='require')
     if db_pool:
         print("✅ Pool de conexiones a PostgreSQL creado exitosamente.")
 except Exception as e:
     print(f"❌ Error al conectar a PostgreSQL: {e}")
 
-# Nueva función segura para pedir una conexión
 def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=False):
     if not db_pool:
         print("❌ No hay pool de conexiones disponible.")
         return None
         
-    conn = db_pool.getconn() # Pedimos un turno
+    conn = db_pool.getconn() 
     res = None
     try:
         with conn.cursor() as c:
@@ -85,14 +82,13 @@ def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=Fa
                 res = c.fetchone()
             if fetchall:
                 res = c.fetchall()
-            # Si fue un INSERT/UPDATE y pedimos saber cuántas filas afectó
             if not fetchone and not fetchall and not commit:
                 res = c.rowcount
     except Exception as e:
         print(f"Error en DB ejecutando '{query}': {e}")
         conn.rollback()
     finally:
-        db_pool.putconn(conn) # Devolvemos el turno siempre
+        db_pool.putconn(conn) 
     return res
 
 def init_db():
@@ -104,10 +100,9 @@ def init_db():
         execute_db_query('''CREATE TABLE IF NOT EXISTS tracking_metricas (tanda_id TEXT, telefono TEXT, evento TEXT, PRIMARY KEY(tanda_id, telefono, evento))''', commit=True)
         execute_db_query('''CREATE TABLE IF NOT EXISTS chats_derivados (telefono TEXT PRIMARY KEY, vendedor TEXT, historial TEXT, fecha TIMESTAMP)''', commit=True)
         
-        # Forzar actualización de esquema viejo
         try:
             execute_db_query("ALTER TABLE chat_sesiones ADD COLUMN advertido INTEGER DEFAULT 0", commit=True)
-        except Exception: pass # Ya existe
+        except Exception: pass 
             
     except Exception as e:
         print(f"Error crítico iniciando tablas: {e}")
@@ -137,15 +132,12 @@ def registrar_metrica(evento, telefono):
         
         if res and res[0]:
             t_id = res[0]
-            # Usamos el pool para el INSERT
             filas_afectadas = execute_db_query("""
                 INSERT INTO tracking_metricas (tanda_id, telefono, evento) 
                 VALUES (%s, %s, %s) 
                 ON CONFLICT (tanda_id, telefono, evento) DO NOTHING
             """, (t_id, tel_10, evento), commit=True)
             
-            # Si el Execute_db_query con commit no devuelve rowcount, lo calculamos manualmente o asumimos
-            # Para simplificar y evitar fallos, forzamos los contadores si el insert no dio error
             if evento == 'delivered':
                 execute_db_query("UPDATE metricas_campanas SET entregados = entregados + 1 WHERE tanda_id = %s", (t_id,), commit=True)
             elif evento == 'read':
@@ -173,7 +165,7 @@ def bloquear_numero_en_sheets(telefono):
     except Exception as e: print(f"❌ Error conectando a Sheets: {e}", flush=True)
 
 # ==========================================
-# RUTINAS AISLADAS CON POOL
+# RUTINAS AISLADAS CON POOL (MODIFICADO)
 # ==========================================
 def revisar_rutinas_de_tiempo():
     try:
@@ -187,19 +179,9 @@ def revisar_rutinas_de_tiempo():
                 bloquear_numero_en_sheets(telefono)
                 execute_db_query("DELETE FROM mensajes WHERE id=%s", (msg_id,), commit=True)
             
-        # --- BLOQUE 2: ADVERTENCIA 50 MINUTOS ---
-        hace_50_minutos = ahora - timedelta(minutes=50)
-        para_advertir = execute_db_query("SELECT telefono FROM chat_sesiones WHERE ultima_interaccion < %s AND advertido = 0", (hace_50_minutos,), fetchall=True)
-        if para_advertir:
-            for (telefono,) in para_advertir:
-                try:
-                    mensaje_advertencia = "⚠️ ¡Hola! Por cuestiones de seguridad, en 10 minutos se cerrará esta conversación automática. Si no me respondés, te derivaré directamente con tu asesor asignado para que te contacte y continúe atendiéndote. ¿Pudiste revisar lo que te comenté?"
-                    enviar_mensaje_whatsapp(telefono, mensaje_advertencia)
-                    execute_db_query("UPDATE chat_sesiones SET advertido = 1 WHERE telefono = %s", (telefono,), commit=True)
-                except Exception as inner_e:
-                    print(f"Fallo individual 50m {telefono}: {inner_e}")
+        # (SE ELIMINÓ EL BLOQUE MOLESTO DE LOS 50 MINUTOS)
             
-        # --- BLOQUE 3: CIERRE 60 MINUTOS ---
+        # --- BLOQUE 2: CIERRE EXACTO A LOS 60 MINUTOS ---
         hace_1_hora = ahora - timedelta(hours=1)
         para_derivar = execute_db_query("SELECT telefono, historial FROM chat_sesiones WHERE ultima_interaccion < %s", (hace_1_hora,), fetchall=True)
         if para_derivar:
@@ -224,9 +206,10 @@ def revisar_rutinas_de_tiempo():
                             ultimo_msg_cliente = msg["parts"][0]
                             break
 
+                    # 1. Le avisamos al Vendedor en silencio
                     aviso_asesor = (
                         f"🤖 *AVISO DEL BOT AUTOMÁTICO*\n\n"
-                        f"El cliente con número +{telefono} ingresó por la campaña *{campana}*, pero el chat expiró por inactividad.\n\n"
+                        f"El cliente con número +{telefono} ingresó por la campaña *{campana}*, pero el chat expiró tras 1 hora de inactividad.\n\n"
                         f"💬 *Último mensaje del cliente:*\n\"{ultimo_msg_cliente}\"\n\n"
                         f"👉 *Acción requerida:* Por favor, revisa el panel de 'Chats Abandonados' en el sistema y contactalo directamente."
                     )
@@ -236,6 +219,11 @@ def revisar_rutinas_de_tiempo():
                     else:
                         enviar_mensaje_whatsapp("5491145394279", aviso_asesor)
 
+                    # 2. ÚNICO MENSAJE DE CIERRE AL CLIENTE
+                    aviso_cliente = "⚠️ ¡Hola! Como pasó 1 hora de inactividad, cerramos esta conversación automática. Tu asesor asignado se pondrá en contacto con vos a la brevedad para continuar atendiéndote de forma personalizada. ¡Gracias!"
+                    enviar_mensaje_whatsapp(telefono, aviso_cliente)
+
+                    # 3. Cerramos el chat en la base de datos
                     execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono,), commit=True)
                 except Exception as inner_e:
                     print(f"Fallo derivando chat {telefono}: {inner_e}")
