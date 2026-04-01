@@ -66,30 +66,48 @@ try:
 except Exception as e:
     print(f"❌ Error al conectar a PostgreSQL: {e}")
 
-def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=False):
+def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=False, retries=1):
+    """Ejecuta una consulta y se auto-reconecta si Neon cortó la conexión (EOF detected)"""
     if not db_pool:
         print("❌ No hay pool de conexiones disponible.")
         return None
         
-    conn = db_pool.getconn() 
-    res = None
-    try:
-        with conn.cursor() as c:
-            c.execute(query, params)
-            if commit:
-                conn.commit()
-            if fetchone:
-                res = c.fetchone()
-            if fetchall:
-                res = c.fetchall()
-            if not fetchone and not fetchall and not commit:
-                res = c.rowcount
-    except Exception as e:
-        print(f"Error en DB ejecutando '{query}': {e}")
-        conn.rollback()
-    finally:
-        db_pool.putconn(conn) 
-    return res
+    for attempt in range(retries + 1):
+        conn = None
+        try:
+            conn = db_pool.getconn() 
+            res = None
+            with conn.cursor() as c:
+                c.execute(query, params)
+                if commit:
+                    conn.commit()
+                if fetchone:
+                    res = c.fetchone()
+                if fetchall:
+                    res = c.fetchall()
+                if not fetchone and not fetchall and not commit:
+                    res = c.rowcount
+            
+            # Si funcionó, devolvemos la conexión sana al pool y retornamos
+            db_pool.putconn(conn)
+            return res
+            
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+            # Si el error es de conexión caída (EOF, connection closed)
+            print(f"⚠️ Conexión caída detectada (Intento {attempt + 1}). Reconectando... Detalle: {e}")
+            if conn:
+                # Descartamos la conexión muerta cerrándola (close=True)
+                db_pool.putconn(conn, close=True)
+            if attempt == retries:
+                print("❌ Falló tras reintentar conectarse.")
+                return None
+        except Exception as e:
+            # Otro tipo de error (sintaxis SQL, etc)
+            print(f"❌ Error en DB ejecutando '{query}': {e}")
+            if conn:
+                conn.rollback()
+                db_pool.putconn(conn)
+            return None
 
 def init_db():
     try:
