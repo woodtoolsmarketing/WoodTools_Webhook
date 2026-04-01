@@ -81,28 +81,25 @@ def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=Fa
                 c.execute(query, params)
                 if commit:
                     conn.commit()
+                # --- ARREGLO DEL CONTADOR ---
                 if fetchone:
                     res = c.fetchone()
-                if fetchall:
+                elif fetchall:
                     res = c.fetchall()
-                if not fetchone and not fetchall and not commit:
-                    res = c.rowcount
+                else:
+                    res = c.rowcount # Ahora sí devuelve 1 cuando suma una métrica
             
-            # Si funcionó, devolvemos la conexión sana al pool y retornamos
             db_pool.putconn(conn)
             return res
             
         except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
-            # Si el error es de conexión caída (EOF, connection closed)
             print(f"⚠️ Conexión caída detectada (Intento {attempt + 1}). Reconectando... Detalle: {e}")
             if conn:
-                # Descartamos la conexión muerta cerrándola (close=True)
                 db_pool.putconn(conn, close=True)
             if attempt == retries:
                 print("❌ Falló tras reintentar conectarse.")
                 return None
         except Exception as e:
-            # Otro tipo de error (sintaxis SQL, etc)
             print(f"❌ Error en DB ejecutando '{query}': {e}")
             if conn:
                 conn.rollback()
