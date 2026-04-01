@@ -2,7 +2,7 @@ import os
 import sqlite3
 import urllib.parse
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, redirect
 import requests
 import gspread
 from google.oauth2.credentials import Credentials 
@@ -96,12 +96,14 @@ def init_db():
         execute_db_query('''CREATE TABLE IF NOT EXISTS mensajes (id TEXT PRIMARY KEY, telefono TEXT, estado TEXT, fecha TIMESTAMP)''', commit=True)
         execute_db_query('''CREATE TABLE IF NOT EXISTS chat_sesiones (telefono TEXT PRIMARY KEY, historial TEXT, ultima_interaccion TIMESTAMP)''', commit=True)
         execute_db_query('''CREATE TABLE IF NOT EXISTS asignaciones_v2 (telefono_cliente TEXT PRIMARY KEY, numero_vendedor TEXT, tipo_campana TEXT, subtipo TEXT, tanda_id TEXT)''', commit=True)
-        execute_db_query('''CREATE TABLE IF NOT EXISTS metricas_campanas (tanda_id TEXT PRIMARY KEY, entregados INTEGER DEFAULT 0, leidos INTEGER DEFAULT 0, respondidos INTEGER DEFAULT 0)''', commit=True)
+        execute_db_query('''CREATE TABLE IF NOT EXISTS metricas_campanas (tanda_id TEXT PRIMARY KEY, entregados INTEGER DEFAULT 0, leidos INTEGER DEFAULT 0, respondidos INTEGER DEFAULT 0, derivados INTEGER DEFAULT 0)''', commit=True)
         execute_db_query('''CREATE TABLE IF NOT EXISTS tracking_metricas (tanda_id TEXT, telefono TEXT, evento TEXT, PRIMARY KEY(tanda_id, telefono, evento))''', commit=True)
         execute_db_query('''CREATE TABLE IF NOT EXISTS chats_derivados (telefono TEXT PRIMARY KEY, vendedor TEXT, historial TEXT, fecha TIMESTAMP)''', commit=True)
         
-        try:
-            execute_db_query("ALTER TABLE chat_sesiones ADD COLUMN advertido INTEGER DEFAULT 0", commit=True)
+        try: execute_db_query("ALTER TABLE chat_sesiones ADD COLUMN advertido INTEGER DEFAULT 0", commit=True)
+        except Exception: pass 
+        
+        try: execute_db_query("ALTER TABLE metricas_campanas ADD COLUMN derivados INTEGER DEFAULT 0", commit=True)
         except Exception: pass 
             
     except Exception as e:
@@ -231,20 +233,20 @@ scheduler.add_job(func=revisar_rutinas_de_tiempo, trigger="interval", minutes=5)
 scheduler.start()
 
 # ==========================================
-# CEREBRO IA: LÓGICA CONDICIONAL DE NOMBRES (REVISADA)
+# CEREBRO IA: LÓGICA CONDICIONAL DE NOMBRES
 # ==========================================
 def obtener_prompt_personalizado(telefono_cliente_completo):
     tel_10_digitos = extraer_10_digitos(telefono_cliente_completo)
     
-    res = execute_db_query("SELECT numero_vendedor, tipo_campana, subtipo FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10_digitos,), fetchone=True)
+    res = execute_db_query("SELECT numero_vendedor, tipo_campana, subtipo, tanda_id FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10_digitos,), fetchone=True)
 
-    # Verificamos si hay un vendedor válido guardado
     numero_db = res[0] if res else None
     if numero_db in ["0", "", "Sin asignar", None]:
         numero_db = None
 
     tipo_camp = res[1] if res else "Promociones"
     subtipo = res[2] if res else ""
+    tanda_id = res[3] if res and len(res) > 3 else "TANDA_DESCONOCIDA"
 
     mapa_nombres = {
         "5491145394279": "Valentín",
@@ -258,14 +260,12 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
         "5491168457778": "Luis Quevedo"
     }
     
-    # Lógica estricta: Solo damos nombre si el número está en el mapa
     if numero_db and numero_db in mapa_nombres:
         nombre_vendedor_ia = mapa_nombres[numero_db]
         tel_vend = numero_db
     else:
-        # Modo genérico (sin nombre propio)
         nombre_vendedor_ia = "tu asesor"
-        tel_vend = "5491145394279" # Link de WhatsApp por defecto
+        tel_vend = "5491145394279" 
     
     plantillas = {
         "Promociones": "Hola, vengo por la promoción de [herramienta] para [material] y quisiera tener más información",
@@ -303,7 +303,7 @@ TUS REGLAS DE CHARLA (¡ESTRICTAS!):
    - Si la frase NO tiene corchetes o solo pide [Vendedor], NO preguntes por herramientas.
 3. REGLA DE HIERRO: NO respondes NADA que salga de tu objetivo. NO das precios, NO hablas de envíos, NO das información de stock, NO haces asesoría técnica.
 4. ¿QUÉ HACER SI PREGUNTAN OTRA COSA?: Si el cliente hace CUALQUIER pregunta técnica o comercial fuera de decirte qué herramienta/material usa, CORTAS EL CHAT respondiendo EXACTAMENTE esto:
-   "Esa es una gran pregunta técnica. Te voy a derivar con {nombre_vendedor_ia} para que te brinde esa información precisa. Hacé clic en este enlace para hablar con él 👉 https://wa.me/{tel_vend}?text=Hola,%20tengo%20una%20consulta"
+   "Esa es una gran pregunta técnica. Te voy a derivar con {nombre_vendedor_ia} para que te brinde esa información precisa. Hacé clic en este enlace para hablar con él 👉 https://woodtools-webhook.onrender.com/go/{tanda_id}/{tel_10_digitos}/{tel_vend}?text=Hola,%20tengo%20una%20consulta"
    (No respondas nada más, solo esa derivación).
 5. CIERRE NORMAL: Una vez que el cliente te dé el material y la herramienta (o los datos que pediste), dile que {nombre_vendedor_ia} lo va a ayudar, despídete y mándale el link con la frase completa.
 
@@ -311,8 +311,8 @@ FORMATO DEL LINK A WHATSAPP PARA EL CIERRE:
 - Reemplaza [herramienta] y [material] con lo que te pidió.
 - Si la frase incluye [Vendedor], reemplázalo con {nombre_vendedor_ia}.
 - Codifica los espacios con '%20'.
-El link EXACTO debe construirse así:
-https://wa.me/{tel_vend}?text=[FRASE_COMPLETADA_Y_CODIFICADA]
+El link EXACTO debe construirse así (respeta la estructura de la URL):
+https://woodtools-webhook.onrender.com/go/{tanda_id}/{tel_10_digitos}/{tel_vend}?text=[FRASE_COMPLETADA_Y_CODIFICADA]
 """
 
 def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
@@ -338,7 +338,8 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
         respuesta = chat.send_message(texto_entrante)
         texto_respuesta = respuesta.text
         
-        if "Te voy a derivar con" in texto_respuesta:
+        # SI LA IA DERIVA AL CLIENTE (PASA CUALQUIER LINK), CERRAMOS LA SESIÓN
+        if "Te voy a derivar con" in texto_respuesta or "/go/" in texto_respuesta or "wa.me" in texto_respuesta:
             tel_10 = extraer_10_digitos(telefono_cliente)
             res_vend = execute_db_query("SELECT numero_vendedor FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), fetchone=True)
             vendedor_asignado = res_vend[0] if res_vend else "Sin asignar"
@@ -373,6 +374,25 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
     return "🚀 Webhook WoodTools + IA Gemini (PostgreSQL Pool) 🚀", 200
+
+# --- ESTA ES LA RUTA QUE RASTREA EL CLIC Y REDIRIGE AL WHATSAPP DEL VENDEDOR ---
+@app.route('/go/<tanda_id>/<telefono_cliente>/<vendedor>', methods=['GET'])
+def redirect_whatsapp(tanda_id, telefono_cliente, vendedor):
+    texto = request.args.get('text', '')
+    try:
+        res = execute_db_query("""
+            INSERT INTO tracking_metricas (tanda_id, telefono, evento) 
+            VALUES (%s, %s, %s) 
+            ON CONFLICT (tanda_id, telefono, evento) DO NOTHING
+        """, (tanda_id, telefono_cliente, 'clicked_link'), commit=True)
+        
+        if res and res > 0:
+            execute_db_query("UPDATE metricas_campanas SET derivados = derivados + 1 WHERE tanda_id = %s", (tanda_id,), commit=True)
+    except Exception as e:
+        print(f"Error tracking click: {e}")
+        
+    url_wa = f"https://wa.me/{vendedor}?text={urllib.parse.quote(texto)}"
+    return redirect(url_wa)
 
 @app.route('/asignar_vendedor', methods=['POST'])
 def asignar_vendedor():
@@ -451,12 +471,17 @@ def recibir_notificaciones():
 @app.route('/metricas', methods=['GET'])
 def obtener_metricas():
     try:
-        filas = execute_db_query("SELECT tanda_id, entregados, leidos, respondidos FROM metricas_campanas", fetchall=True)
+        filas = execute_db_query("SELECT tanda_id, entregados, leidos, respondidos, derivados FROM metricas_campanas", fetchall=True)
         if filas is None: return jsonify({}), 200
 
         datos_nube = {}
         for fila in filas:
-            datos_nube[fila[0]] = {"entregados": fila[1], "leidos": fila[2], "respondidos": fila[3]}
+            datos_nube[fila[0]] = {
+                "entregados": fila[1], 
+                "leidos": fila[2], 
+                "respondidos": fila[3],
+                "derivados": fila[4] if len(fila) > 4 and fila[4] is not None else 0
+            }
         return jsonify(datos_nube), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -471,7 +496,7 @@ def obtener_tracking_general():
         for tanda_id, telefono, evento in filas:
             if tanda_id not in datos_tracking:
                 datos_tracking[tanda_id] = {}
-            jerarquia = {'sent': 1, 'delivered': 2, 'read': 3, 'responded': 4}
+            jerarquia = {'sent': 1, 'delivered': 2, 'read': 3, 'responded': 4, 'clicked_link': 5}
             evento_actual = datos_tracking[tanda_id].get(telefono, 'sent')
             if jerarquia.get(evento, 0) > jerarquia.get(evento_actual, 0):
                 datos_tracking[tanda_id][telefono] = evento
