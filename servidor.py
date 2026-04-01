@@ -67,7 +67,6 @@ except Exception as e:
     print(f"❌ Error al conectar a PostgreSQL: {e}")
 
 def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=False, retries=1):
-    """Ejecuta una consulta y se auto-reconecta si Neon cortó la conexión (EOF detected)"""
     if not db_pool:
         print("❌ No hay pool de conexiones disponible.")
         return None
@@ -81,13 +80,12 @@ def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=Fa
                 c.execute(query, params)
                 if commit:
                     conn.commit()
-                # --- ARREGLO DEL CONTADOR ---
                 if fetchone:
                     res = c.fetchone()
                 elif fetchall:
                     res = c.fetchall()
                 else:
-                    res = c.rowcount # Ahora sí devuelve 1 cuando suma una métrica
+                    res = c.rowcount
             
             db_pool.putconn(conn)
             return res
@@ -390,7 +388,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
 def inicio():
     return "🚀 Webhook WoodTools + IA Gemini (PostgreSQL Pool) 🚀", 200
 
-# --- ESTA ES LA RUTA QUE RASTREA EL CLIC Y REDIRIGE AL WHATSAPP DEL VENDEDOR ---
+# --- ESTA ES LA RUTA QUE RASTREA EL CLIC Y ABRE LA APP DIRECTO ---
 @app.route('/go/<tanda_id>/<telefono_cliente>/<vendedor>', methods=['GET'])
 def redirect_whatsapp(tanda_id, telefono_cliente, vendedor):
     texto = request.args.get('text', '')
@@ -406,8 +404,42 @@ def redirect_whatsapp(tanda_id, telefono_cliente, vendedor):
     except Exception as e:
         print(f"Error tracking click: {e}")
         
-    url_wa = f"https://wa.me/{vendedor}?text={urllib.parse.quote(texto)}"
-    return redirect(url_wa)
+    texto_codificado = urllib.parse.quote(texto)
+    
+    # Redirección inteligente: Intenta abrir la app de WhatsApp directo, si falla usa Web
+    html = f"""
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Conectando...</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; text-align: center; margin-top: 50px; color: #333; background-color: #f8f8f8; }}
+            .loader {{ border: 4px solid #e0e0e0; border-top: 4px solid #25D366; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }}
+            @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
+            a {{ color: #25D366; text-decoration: none; font-weight: bold; font-size: 1.1rem; }}
+        </style>
+        <script>
+            window.onload = function() {{
+                // 1. Intenta abrir la app directamente usando el Deep Link
+                window.location.replace("whatsapp://send?phone={vendedor}&text={texto_codificado}");
+                
+                // 2. Plan de respaldo: Si a los 2 segundos la app no se abrió, va a la web
+                setTimeout(function() {{
+                    window.location.replace("https://wa.me/{vendedor}?text={texto_codificado}");
+                }}, 2000);
+            }};
+        </script>
+    </head>
+    <body>
+        <h2>Conectando con tu asesor...</h2>
+        <div class="loader"></div>
+        <p>Si la aplicación no se abre automáticamente,<br><br><a href="https://wa.me/{vendedor}?text={texto_codificado}">Haz clic aquí para chatear</a>.</p>
+    </body>
+    </html>
+    """
+    return html
 
 @app.route('/asignar_vendedor', methods=['POST'])
 def asignar_vendedor():
