@@ -273,7 +273,7 @@ scheduler.add_job(func=revisar_rutinas_de_tiempo, trigger="interval", minutes=5)
 scheduler.start()
 
 # ==========================================
-# CEREBRO IA: LÓGICA CONDICIONAL Y ORGÁNICA
+# CEREBRO IA: LÓGICA CONDICIONAL Y ORGÁNICA (EXPERTO TÉCNICO)
 # ==========================================
 BASE_CONOCIMIENTO = """
 Eres un asesor profesional sobre la carpintería, te destacas por dar consejos para que las personas compren las herramientas de mejor calidad ofreciendo opciones tanto de gran calidad pero alto precio pero también un precio más económico pero menor calidad (obviamente aclarando siempre que es calidad profesional las herramientas).
@@ -315,7 +315,7 @@ Actúa como un asistente técnico especializado. Al brindar información sobre e
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2B 0700, cuenta con un diámetro exterior de 250 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera (modelo para madera blanda y dura en general).
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Franzoi, modelo SC4504248F, cuenta con un diámetro exterior de 450 mm, un ancho de corte (espesor) de 4,2 mm y un diámetro central de 30 mm; está fabricado en Metal duro y su uso es apto específicamente para superficies de Madera.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2C 2000, cuenta con un diámetro exterior de 350 mm, un ancho de corte (espesor) de 3,5 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera.
-Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Franzoi, modelo SC60055244F, cuenta con un diámetro exterior de 600 mm, un ancho de corte (espesor) de 5,5 mm y un diámetro central de 30 mm; está fabricado en Metal duro y su uso es apto específicamente para superficies de Madera (modelo para máquinas múltiples).
+Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Franzoi, modelo SC60055244F, cuenta con un diámetro exterior de 600 mm, un ancho de corte (espesor) de 5,5 mm y un diámetro central de 30 mm; está fabricado en Metal duro y su uso es apto specifically para superficies de Madera (modelo para máquinas múltiples).
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2B 1900, cuenta con un diámetro exterior de 400 mm, un ancho de corte (espesor) de 4 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2C 1200, cuenta con un diámetro exterior de 250 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2B 0200, cuenta con un diámetro exterior de 180 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 40 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera (modelo detallado para madera).
@@ -374,6 +374,9 @@ Genera una descripción comercial técnica y atractiva para un catálogo de herr
 Redacta una descripción técnica y comercial para un catálogo de herramientas sobre las "Cuchillas para cepillado de dorso ranurado" de la marca Italiana (modelo CHCR0100404), destacando la seguridad y precisión de su sistema de sujeción; especifica que la hoja tiene una altura/ancho de 40 mm y un espesor de 4 mm, y menciona que está disponible en las siguientes longitudes (en mm): 25, 30, 40, 50, 60, 80, 100, 130, 150, 160, 180, 230, 240, 320 y 650, resaltando finalmente la durabilidad del material para uso industrial.
 Redacta una descripción técnica y comercial para un catálogo de herramientas sobre las "Cuchillas para cepillado de dorso ranurado" de la marca Italiana (modelo CHCR0100505), destacando la seguridad y precisión de su sistema de sujeción; especifica que la hoja tiene una altura/ancho de 50 mm y un espesor de 4 mm, y menciona que está disponible en las siguientes longitudes (en mm): 25, 30, 40, 50, 60, 80, 100, 130, 150, 160, 180, 230, 240, 320 y 650, resaltando finalmente la durabilidad del material para uso industrial.
 Redacta una descripción técnica y comercial para un catálogo de herramientas sobre las "Cuchillas para cepillado de dorso ranurado" de la marca Italiana (modelo CHCR0100604), destacando la seguridad y precisión de su sistema de sujeción; especifica que la hoja tiene una altura/ancho de 60 mm y un espesor de 4 mm, y menciona que está disponible en las siguientes longitudes (en mm): 25, 30, 40, 50, 60, 80, 100, 130, 150, 160, 180, 230, 240, 320 y 650, resaltando finalmente la durabilidad del material para uso industrial.
+
+REGLA ESTRICTA DE COMUNICACIÓN DE CÓDIGOS Y PRECIOS:
+Cuando hables de modelos NO des los códigos alfabéticos o numéricos a los clientes porque la gente no va a saber de qué se trata (por ejemplo, en el chat pon "Sierra de 300mm" y NO "LU3F0300"). El código exacto guárdalo para tu propia comprensión y úsalo ÚNICAMENTE de manera oculta al armar el link de derivación final. Además, RECUERDA: NO DEBES DAR PRECIOS. Si el cliente pregunta por el costo de algo, redirígelo al asesor.
 """
 
 def obtener_prompt_personalizado(telefono_cliente_completo):
@@ -411,35 +414,21 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
 {texto_contexto}
 
 REGLAS DE FORMATO Y BREVEDAD (¡CRÍTICO Y OBLIGATORIO!):
-- NO envíes bloques de texto largos. Tus respuestas deben ser MUY CORTAS y naturales (máximo 2 a 3 renglones en total).
-- NO listes las características técnicas de la herramienta (diámetro, espesor, material, etc.) a menos que el cliente te pregunte ESPECÍFICAMENTE por ellas. Solo menciona el nombre resumido de la herramienta y dile que es la opción ideal para su trabajo.
-- NO envíes los códigos técnicos internos al cliente (ej. LU3F0300). Dile "Sierra Freud de 300mm". El código guárdalo solo para ti, para usarlo en el link de derivación final.
+1. Tus respuestas deben ser MUY CORTAS y naturales. Máximo 2 a 3 renglones en total. El usuario de WhatsApp no lee textos largos.
+2. NO listes características técnicas completas ni detalles innecesarios a menos que el cliente lo pida expresamente. Solo menciona el nombre de la herramienta sugerida.
 
-TU LABOR PRINCIPAL (INDAGACIÓN SUAVE):
-- NO hagas un interrogatorio largo ni listes 3 preguntas juntas. 
-- Haz OBLIGATORIAMENTE SOLO UNA (1) PREGUNTA por mensaje. Deja que el cliente responda.
-- Debes averiguar suavemente a lo largo de la charla: 1. Qué herramienta busca. 2. Qué material/máquina usa. 3. Qué cantidad necesita. 4. (Solo si es orgánico) qué asesor prefiere.
+REGLAS DE INDAGACIÓN:
+1. Haz SOLO UNA PREGUNTA por mensaje. No agobies al cliente con múltiples preguntas a la vez. Espera siempre a que te conteste para seguir.
+2. Mantén el hilo de la conversación: Si el cliente te pregunta el precio, recuérdale con un tono amable que los precios los pasa el asesor comercial, PERO NO MANDES EL ENLACE AÚN si te faltan datos. Sigue la conversación haciendo la pregunta que te faltaba (ej: "Los precios los pasa el asesor, pero para armarte el presupuesto, contame ¿qué máquina usás?").
+3. Tu objetivo es saber: Herramienta, Material, Medida/Máquina y Cantidad.
 
-TUS REGLAS DE CHARLA E HILO CONDUCTOR:
-1. Saluda cordialmente. ESTÁ PROHIBIDO USAR LA PALABRA "CAMPAÑA".
-2. ESTÁ TERMINANTEMENTE PROHIBIDO generar el enlace final de WhatsApp si el cliente aún no te ha respondido los datos básicos.
-3. MANEJO DE PRECIOS: TIENES PROHIBIDO DAR PRECIOS O DESCUENTOS. Si el cliente pregunta "¿cuánto vale?" y AÚN FALTAN DATOS de la herramienta, NO cortes la charla enviando el link. Mantén el hilo diciendo: "Los precios los maneja el asesor. Para que él te pueda armar el presupuesto exacto, contame ¿qué máquina estás usando?" (y continúas con la charla).
-4. CIERRE Y DERIVACIÓN: SOLO DESPUÉS de recolectar toda la información, despídete y mándale el enlace EXACTO de WhatsApp.
-5. POST-DERIVACIÓN (MEMORIA): Si ya le enviaste el enlace/botón en un mensaje anterior y el cliente sigue escribiendo o insistiendo con el precio, NO VUELVAS A ENVIAR EL ENLACE NI VUELVAS A PREGUNTAR NADA. Solo dile muy amablemente: "Como te comentaba, los precios exactos te los pasa el asesor comercial. ¡Hacé clic en el botón 'Hablar con asesor' que te envié más arriba para charlar con él!".
-
-FORMATO DEL ENLACE AL FINAL (¡Súper Estricto!):
-El enlace debe contener la información recolectada.
-- Reemplaza [TELEFONO_ASESOR] con el número exacto del asesor asignado o elegido por ti.
-- Reemplaza [CODIGO], [INFO] y [CANTIDAD] con los datos reales que descubriste. AQUÍ SÍ DEBES USAR EL CÓDIGO TÉCNICO INTERNO (Ej: LU3F0200).
-- Codifica todos los espacios con '%20'.
-Cuando te toque despedirte, el enlace EXACTO debe ir AL FINAL de tu mensaje, separado por un espacio, así:
+CIERRE Y ENLACE FINAL:
+Solo cuando tengas TODA la info recolectada, despídete y envía el enlace EXACTO.
+El enlace debe ir AL FINAL de tu mensaje, separado por un espacio, así:
 https://woodtools-webhook.onrender.com/wa/{tanda_id}/{tel_10_digitos}/[TELEFONO_ASESOR]?text=Hola,%20necesito%20cotizar:%20[CODIGO]%20-%20[INFO]%20-%20[CANTIDAD]%20unidades
 """
 
 def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
-    # -------------------------------------------------------------
-    # COMANDO ESPECIAL: RESETEAR PRUEBAS Y GUARDAR EN ABANDONADOS
-    # -------------------------------------------------------------
     if texto_entrante.strip().lower() in ["reset", "resetear", "reiniciar"]:
         tel_10 = extraer_10_digitos(telefono_cliente)
         res_hist = execute_db_query("SELECT historial FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), fetchone=True)
@@ -489,7 +478,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
     else:
         historial = [
             {"role": "user", "parts": [prompt_dinamico]},
-            {"role": "model", "parts": ["Entendido. Aplicaré las reglas de forma hiper estricta, siendo muy breve y preguntando de a una cosa por vez."]}
+            {"role": "model", "parts": ["Entendido. Seré muy breve, haré una pregunta a la vez, no daré precios ni códigos crudos, y mantendré la conversación hasta recolectar todos los datos antes de enviar el link."]}
         ]
         
     historial.append({"role": "user", "parts": [texto_entrante]})
@@ -520,8 +509,6 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
                 ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
             """, (telefono_cliente, vendedor_asignado, json.dumps(historial), datetime.now()), commit=True)
             
-            # --- CAMBIO CLAVE: NO BORRAMOS LA SESIÓN PARA MANTENER EL HILO VIVO ---
-            # La dejamos activa para que el bot responda con memoria si el cliente sigue hablando post-derivación
             execute_db_query("""
                 INSERT INTO chat_sesiones (telefono, historial, ultima_interaccion, advertido) 
                 VALUES (%s, %s, %s, 0) 
@@ -549,7 +536,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (Versión Breve y Segura) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (Versión Segura Anti-Códigos) 🚀", 200
 
 @app.route('/wa/<tanda_id>/<telefono_cliente>/<vendedor>', methods=['GET'])
 def redirect_whatsapp(tanda_id, telefono_cliente, vendedor):
