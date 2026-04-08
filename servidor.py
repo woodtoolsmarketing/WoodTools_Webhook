@@ -11,7 +11,7 @@ import google.generativeai as genai
 import json
 import psycopg2 
 from psycopg2 import pool 
-import re # IMPORTANTE PARA DETECTAR EL ENLACE
+import re 
 
 app = Flask(__name__)
 
@@ -92,12 +92,8 @@ def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=Fa
             return res
             
         except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
-            print(f"⚠️ Conexión caída detectada (Intento {attempt + 1}). Reconectando... Detalle: {e}")
-            if conn:
-                db_pool.putconn(conn, close=True)
-            if attempt == retries:
-                print("❌ Falló tras reintentar conectarse.")
-                return None
+            if conn: db_pool.putconn(conn, close=True)
+            if attempt == retries: return None
         except Exception as e:
             print(f"❌ Error en DB ejecutando '{query}': {e}")
             if conn:
@@ -119,6 +115,10 @@ def init_db():
         
         try: execute_db_query("ALTER TABLE metricas_campanas ADD COLUMN derivados INTEGER DEFAULT 0", commit=True)
         except Exception: pass 
+        
+        # Inicializamos la métrica "ORGANICO" para poder sumar los chats de la nada
+        try: execute_db_query("INSERT INTO metricas_campanas (tanda_id, entregados, leidos, respondidos, derivados) VALUES ('ORGANICO', 0, 0, 0, 0) ON CONFLICT (tanda_id) DO NOTHING", commit=True)
+        except Exception: pass
             
     except Exception as e:
         print(f"Error crítico iniciando tablas: {e}")
@@ -135,13 +135,11 @@ def extraer_10_digitos(num):
     solo_numeros = limpiar_numero(num)
     return solo_numeros[-10:] if len(solo_numeros) >= 10 else solo_numeros
 
-# --- NUEVA FUNCIÓN CON SOPORTE PARA BOTONES INTERACTIVOS ---
 def enviar_mensaje_whatsapp(telefono_destino, texto, link_boton=None):
     url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {CLOUD_API_TOKEN}", "Content-Type": "application/json"}
     
     if link_boton:
-        # Enviamos un Botón CTA interactivo que esconde el link
         data = {
             "messaging_product": "whatsapp",
             "to": telefono_destino,
@@ -159,26 +157,13 @@ def enviar_mensaje_whatsapp(telefono_destino, texto, link_boton=None):
             }
         }
     else:
-        # Texto normal
-        data = {
-            "messaging_product": "whatsapp", 
-            "to": telefono_destino, 
-            "type": "text", 
-            "text": {"body": texto}
-        }
+        data = {"messaging_product": "whatsapp", "to": telefono_destino, "type": "text", "text": {"body": texto}}
         
     res = requests.post(url, headers=headers, json=data)
     
-    # PLAN B: Si la API de Meta rechaza el botón por la versión de WhatsApp del cliente, mandamos el link en texto normal
     if res.status_code >= 400 and link_boton:
-        print("Aviso: El botón interactivo falló, aplicando Plan B (Texto).", res.json())
         texto_fallback = f"{texto}\n\n👉 {link_boton}"
-        data_fallback = {
-            "messaging_product": "whatsapp", 
-            "to": telefono_destino, 
-            "type": "text", 
-            "text": {"body": texto_fallback}
-        }
+        data_fallback = {"messaging_product": "whatsapp", "to": telefono_destino, "type": "text", "text": {"body": texto_fallback}}
         requests.post(url, headers=headers, json=data_fallback)
 
 def registrar_metrica(evento, telefono):
@@ -205,9 +190,7 @@ def registrar_metrica(evento, telefono):
 
 def bloquear_numero_en_sheets(telefono):
     try:
-        if not os.path.exists(RUTA_CREDENCIALES):
-            return False
-            
+        if not os.path.exists(RUTA_CREDENCIALES): return False
         gc = gspread.service_account(filename=RUTA_CREDENCIALES)
         sh = gc.open(NOMBRE_HOJA)
         
@@ -305,15 +288,16 @@ CONTEXTO:
 Este es un cliente "Orgánico" (nos contactó por su cuenta, de la nada). 
 No tiene un vendedor asignado todavía.
 
-TUS REGLAS DE CHARLA (¡ESTRICTAS!):
-1. Saluda cordialmente y pregúntale en qué lo puedes ayudar.
-2. Tu OBJETIVO ÚNICO es recopilar información para armar esta frase final: "Hola vengo a buscar información sobre [herramienta] para trabajar en [material]".
-   - Pregúntale sutilmente qué herramienta y material necesita.
-3. ELECCIÓN DEL ASESOR: Si el cliente ya conoce a un asesor y lo nombra, envíalo con ese. PERO si el cliente responde de manera ambigua (ej: "con cualquiera", "me da igual", "no lo sé", "el que esté libre"), DEBES ELEGIR Y RECOMENDAR OBLIGATORIAMENTE A UNO DE ESTOS TRES ASESORES AL AZAR: Carlos, Valentín o Emmanuel.
+TUS REGLAS DE CHARLA (¡ESTRICTAS E INQUEBRANTABLES!):
+1. Tu PRIMERA respuesta OBLIGATORIAMENTE debe ser solo un saludo y hacer estas DOS preguntas para entender qué necesita:
+   - ¿Qué herramienta y para qué material estás buscando?
+   - ¿Tenés algún asesor comercial de preferencia? (ofrece como opciones a Carlos, Valentín o Emmanuel).
+2. ESTÁ TERMINANTEMENTE PROHIBIDO enviar el enlace de derivación en tu primer o segundo mensaje si el cliente aún no te ha respondido a ambas preguntas.
+3. Si el cliente responde que "no sabe", "cualquiera", o "me da igual" sobre el asesor, ELIGE TÚ UN ASESOR AL AZAR EXCLUSIVAMENTE ENTRE: Carlos, Valentín o Emmanuel.
 4. REGLA DE HIERRO: NO respondes NADA que salga de tu objetivo. NO das precios, NO hablas de envíos, NO haces asesoría técnica. Todo eso lo hará el asesor.
-5. CIERRE NORMAL: Cuando ya tengas la herramienta, el material y el nombre del asesor, despídete cordialmente y mándale el enlace EXACTO de WhatsApp. No escribas nada más después del enlace.
+5. CIERRE NORMAL: SOLO DESPUÉS de que el cliente haya respondido a tus preguntas, despídete y mándale el enlace EXACTO de WhatsApp.
 
-LISTA DE ASESORES Y SUS TELÉFONOS (Usa el número exacto del que elijas):
+LISTA DE ASESORES Y SUS TELÉFONOS (Usa el número exacto del que elijas para el enlace):
 - Valentín: 5491145394279
 - Emmanuel: 5491157528428
 - Carlos: 5491165630406
@@ -327,7 +311,7 @@ LISTA DE ASESORES Y SUS TELÉFONOS (Usa el número exacto del que elijas):
 FORMATO DEL ENLACE AL FINAL (¡Súper Estricto!):
 - Reemplaza [TELEFONO_ASESOR] con el número del asesor elegido.
 - Codifica todos los espacios del texto con '%20'.
-El enlace EXACTO debe ir AL FINAL de tu mensaje, separado por un espacio, así:
+Cuando te toque despedirte, el enlace EXACTO debe ir AL FINAL de tu mensaje, separado por un espacio, así:
 https://woodtools-webhook.onrender.com/wa/ORGANICO/{tel_10_digitos}/[TELEFONO_ASESOR]?text=Hola%20vengo%20a%20buscar%20informaci%C3%B3n%20sobre%20[herramienta]%20para%20trabajar%20en%20[material]
 """
 
@@ -412,6 +396,17 @@ https://woodtools-webhook.onrender.com/wa/{tanda_id}/{tel_10_digitos}/{tel_vend}
 def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
     resultado = execute_db_query("SELECT historial FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), fetchone=True)
     
+    # -------------------------------------------------------------
+    # REGISTRO DE MÉTRICAS "ORGÁNICAS" (Al Iniciar el chat)
+    # -------------------------------------------------------------
+    tel_10 = extraer_10_digitos(telefono_cliente)
+    res_tanda = execute_db_query("SELECT tanda_id FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), fetchone=True)
+    tanda_id_actual = res_tanda[0] if (res_tanda and res_tanda[0]) else "ORGANICO"
+    
+    if not resultado and tanda_id_actual == "ORGANICO":
+        # Sumamos +1 a las conversaciones orgánicas iniciadas
+        execute_db_query("UPDATE metricas_campanas SET respondidos = respondidos + 1 WHERE tanda_id = 'ORGANICO'", commit=True)
+    
     prompt_dinamico = obtener_prompt_personalizado(telefono_cliente)
     
     if resultado:
@@ -435,19 +430,16 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
         texto_limpio = texto_respuesta
         link_extraido = None
         
-        # --- DETECTAMOS Y EXTRAEMOS EL ENLACE DEL TEXTO DE GEMINI ---
+        # Detectamos si la IA por fin mandó el enlace
         match = re.search(r'(https://woodtools-webhook\.onrender\.com/wa/\S+)', texto_respuesta)
         if match:
             link_extraido = match.group(1)
-            # Removemos el link y frases molestas apuntando al link, porque ahora será un botón
             texto_limpio = texto_respuesta.replace(link_extraido, "").strip()
             texto_limpio = texto_limpio.replace("👉", "").replace("Hacé clic en este enlace para hablar con él", "").strip()
         
-        # SI LA IA DERIVA AL CLIENTE (HAY LINK O MENCIONA DERIVACIÓN), CERRAMOS LA SESIÓN
+        # SI LA IA DERIVA AL CLIENTE (Envía el botón/link), CERRAMOS LA SESIÓN INMEDIATAMENTE
         if link_extraido or "Te voy a derivar con" in texto_respuesta:
-            tel_10 = extraer_10_digitos(telefono_cliente)
-            res_vend = execute_db_query("SELECT numero_vendedor FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), fetchone=True)
-            vendedor_asignado = res_vend[0] if res_vend else "Orgánico / Asignado por IA"
+            vendedor_asignado = "Orgánico / Asignado por IA" if tanda_id_actual == "ORGANICO" else "Vendedor de Campaña"
             
             historial.append({"role": "model", "parts": [texto_respuesta]})
             
@@ -457,6 +449,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
                 ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
             """, (telefono_cliente, vendedor_asignado, json.dumps(historial), datetime.now()), commit=True)
             
+            # ESTO BORRA LA MEMORIA PARA QUE EL PRÓXIMO MENSAJE SEA UN CHAT NUEVO Y LIMPIO
             execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), commit=True)
         else:
             historial.append({"role": "model", "parts": [texto_respuesta]})
@@ -467,7 +460,6 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
                 DO UPDATE SET historial = EXCLUDED.historial, ultima_interaccion = EXCLUDED.ultima_interaccion, advertido = 0
             """, (telefono_cliente, json.dumps(historial), datetime.now()), commit=True)
             
-        # ENVIAMOS EL MENSAJE FINAL AL CLIENTE (Si detectó link, le arma el botón mágico)
         enviar_mensaje_whatsapp(telefono_cliente, texto_limpio, link_boton=link_extraido)
         
     except Exception as e:
@@ -479,23 +471,21 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (Botones Interactivos) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (Botones y Orgánico) 🚀", 200
 
-# --- ESTA ES LA RUTA QUE RASTREA EL CLIC Y ABRE LA APP DIRECTO ---
 @app.route('/wa/<tanda_id>/<telefono_cliente>/<vendedor>', methods=['GET'])
 def redirect_whatsapp(tanda_id, telefono_cliente, vendedor):
     texto = request.args.get('text', '')
     try:
-        # Solo sumamos a las métricas si el click NO vino de un chat orgánico
-        if tanda_id != "ORGANICO":
-            res = execute_db_query("""
-                INSERT INTO tracking_metricas (tanda_id, telefono, evento) 
-                VALUES (%s, %s, %s) 
-                ON CONFLICT (tanda_id, telefono, evento) DO NOTHING
-            """, (tanda_id, telefono_cliente, 'clicked_link'), commit=True)
-            
-            if res and res > 0:
-                execute_db_query("UPDATE metricas_campanas SET derivados = derivados + 1 WHERE tanda_id = %s", (tanda_id,), commit=True)
+        # Registramos el CLIC. Ahora SÍ permitimos que cuente a los Orgánicos.
+        res = execute_db_query("""
+            INSERT INTO tracking_metricas (tanda_id, telefono, evento) 
+            VALUES (%s, %s, %s) 
+            ON CONFLICT (tanda_id, telefono, evento) DO NOTHING
+        """, (tanda_id, telefono_cliente, 'clicked_link'), commit=True)
+        
+        if res and res > 0:
+            execute_db_query("UPDATE metricas_campanas SET derivados = derivados + 1 WHERE tanda_id = %s", (tanda_id,), commit=True)
     except Exception as e:
         print(f"Error tracking click: {e}")
         
