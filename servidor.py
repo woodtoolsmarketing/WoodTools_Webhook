@@ -116,7 +116,11 @@ def init_db():
         try: execute_db_query("ALTER TABLE metricas_campanas ADD COLUMN derivados INTEGER DEFAULT 0", commit=True)
         except Exception: pass 
         
-        # Inicializamos la métrica "ORGANICO" para poder sumar los chats de la nada
+        # Agregamos fecha a asignaciones para expirar campañas muy viejas sin respuesta
+        try: execute_db_query("ALTER TABLE asignaciones_v2 ADD COLUMN fecha_asignacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP", commit=True)
+        except Exception: pass
+
+        # Inicializamos la métrica "ORGANICO"
         try: execute_db_query("INSERT INTO metricas_campanas (tanda_id, entregados, leidos, respondidos, derivados) VALUES ('ORGANICO', 0, 0, 0, 0) ON CONFLICT (tanda_id) DO NOTHING", commit=True)
         except Exception: pass
             
@@ -210,13 +214,18 @@ def revisar_rutinas_de_tiempo():
     try:
         ahora = datetime.now()
         
+        # 1. Borrar fallos de 48hs
         hace_48_horas = ahora - timedelta(hours=48)
         para_borrar = execute_db_query("SELECT id, telefono FROM mensajes WHERE estado='sent' AND fecha < %s", (hace_48_horas,), fetchall=True)
         if para_borrar:
             for msg_id, telefono in para_borrar:
                 bloquear_numero_en_sheets(telefono)
                 execute_db_query("DELETE FROM mensajes WHERE id=%s", (msg_id,), commit=True)
+        
+        # 2. Limpiar campañas muertas (+48hs sin interacción) para evitar reactivaciones fantasma
+        execute_db_query("DELETE FROM asignaciones_v2 WHERE (fecha_asignacion < %s OR fecha_asignacion IS NULL) AND telefono_cliente NOT IN (SELECT telefono FROM chat_sesiones)", (hace_48_horas,), commit=True)
             
+        # 3. CIERRE EXACTO A LOS 60 MINUTOS
         hace_1_hora = ahora - timedelta(hours=1)
         para_derivar = execute_db_query("SELECT telefono, historial FROM chat_sesiones WHERE ultima_interaccion < %s", (hace_1_hora,), fetchall=True)
         if para_derivar:
@@ -256,7 +265,9 @@ def revisar_rutinas_de_tiempo():
                     aviso_cliente = "⚠️ ¡Hola! Como pasó 1 hora de inactividad, cerramos esta conversación automática. Tu asesor asignado se pondrá en contacto con vos a la brevedad para continuar atendiéndote de forma personalizada. ¡Gracias!"
                     enviar_mensaje_whatsapp(telefono, aviso_cliente)
 
+                    # AL CERRAR, BORRAMOS EL REGISTRO DE LA CAMPAÑA PARA QUE EL PRÓXIMO CONTACTO SEA ORGÁNICO
                     execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono,), commit=True)
+                    execute_db_query("DELETE FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), commit=True)
                 except Exception as inner_e:
                     print(f"Fallo derivando chat {telefono}: {inner_e}")
 
@@ -394,12 +405,35 @@ https://woodtools-webhook.onrender.com/wa/{tanda_id}/{tel_10_digitos}/{tel_vend}
 """
 
 def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
-    resultado = execute_db_query("SELECT historial FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), fetchone=True)
+    # Revisamos si existe sesión y hace cuánto fue el último mensaje
+    resultado = execute_db_query("SELECT historial, ultima_interaccion FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), fetchone=True)
+    tel_10 = extraer_10_digitos(telefono_cliente)
     
     # -------------------------------------------------------------
-    # REGISTRO DE MÉTRICAS "ORGÁNICAS" (Al Iniciar el chat)
+    # 1. BARRIDO DE SEGURIDAD (Si Render se durmió)
     # -------------------------------------------------------------
-    tel_10 = extraer_10_digitos(telefono_cliente)
+    if resultado:
+        historial_str = resultado[0]
+        ultima_interaccion = resultado[1]
+        
+        # Si el chat está colgado hace más de 1 hora, lo cerramos forzosamente y limpiamos
+        if ultima_interaccion and datetime.now() - ultima_interaccion > timedelta(hours=1):
+            res_vend = execute_db_query("SELECT numero_vendedor FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), fetchone=True)
+            vendedor_asignado = res_vend[0] if res_vend else "Sin asignar"
+            
+            execute_db_query("""
+                INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
+            """, (telefono_cliente, vendedor_asignado, historial_str, datetime.now()), commit=True)
+            
+            execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), commit=True)
+            execute_db_query("DELETE FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), commit=True)
+            resultado = None  # Reseteamos para que se procese como chat nuevo
+            
+    # -------------------------------------------------------------
+    # 2. IDENTIFICACIÓN Y MÉTRICAS
+    # -------------------------------------------------------------
     res_tanda = execute_db_query("SELECT tanda_id FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), fetchone=True)
     tanda_id_actual = res_tanda[0] if (res_tanda and res_tanda[0]) else "ORGANICO"
     
@@ -430,7 +464,6 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
         texto_limpio = texto_respuesta
         link_extraido = None
         
-        # Detectamos si la IA por fin mandó el enlace
         match = re.search(r'(https://woodtools-webhook\.onrender\.com/wa/\S+)', texto_respuesta)
         if match:
             link_extraido = match.group(1)
@@ -449,8 +482,9 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
                 ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
             """, (telefono_cliente, vendedor_asignado, json.dumps(historial), datetime.now()), commit=True)
             
-            # ESTO BORRA LA MEMORIA PARA QUE EL PRÓXIMO MENSAJE SEA UN CHAT NUEVO Y LIMPIO
+            # BORRAMOS LA MEMORIA Y LA ASIGNACIÓN PARA QUE EL PRÓXIMO MENSAJE SEA UN CHAT LIMPIO
             execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), commit=True)
+            execute_db_query("DELETE FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), commit=True)
         else:
             historial.append({"role": "model", "parts": [texto_respuesta]})
             execute_db_query("""
@@ -477,7 +511,6 @@ def inicio():
 def redirect_whatsapp(tanda_id, telefono_cliente, vendedor):
     texto = request.args.get('text', '')
     try:
-        # Registramos el CLIC. Ahora SÍ permitimos que cuente a los Orgánicos.
         res = execute_db_query("""
             INSERT INTO tracking_metricas (tanda_id, telefono, evento) 
             VALUES (%s, %s, %s) 
@@ -533,11 +566,11 @@ def asignar_vendedor():
     
     if telefono_cliente_10 and numero_vendedor:
         execute_db_query("""
-            INSERT INTO asignaciones_v2 (telefono_cliente, numero_vendedor, tipo_campana, subtipo, tanda_id) 
-            VALUES (%s, %s, %s, %s, %s) 
+            INSERT INTO asignaciones_v2 (telefono_cliente, numero_vendedor, tipo_campana, subtipo, tanda_id, fecha_asignacion) 
+            VALUES (%s, %s, %s, %s, %s, %s) 
             ON CONFLICT (telefono_cliente) 
-            DO UPDATE SET numero_vendedor=EXCLUDED.numero_vendedor, tipo_campana=EXCLUDED.tipo_campana, subtipo=EXCLUDED.subtipo, tanda_id=EXCLUDED.tanda_id
-        """, (telefono_cliente_10, numero_vendedor, tipo_campana, subtipo, tanda_id), commit=True)
+            DO UPDATE SET numero_vendedor=EXCLUDED.numero_vendedor, tipo_campana=EXCLUDED.tipo_campana, subtipo=EXCLUDED.subtipo, tanda_id=EXCLUDED.tanda_id, fecha_asignacion=EXCLUDED.fecha_asignacion
+        """, (telefono_cliente_10, numero_vendedor, tipo_campana, subtipo, tanda_id, datetime.now()), commit=True)
         
         if tanda_id:
             execute_db_query("""
