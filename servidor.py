@@ -11,6 +11,7 @@ import google.generativeai as genai
 import json
 import psycopg2 
 from psycopg2 import pool 
+import re # IMPORTANTE PARA DETECTAR EL ENLACE
 
 app = Flask(__name__)
 
@@ -134,11 +135,51 @@ def extraer_10_digitos(num):
     solo_numeros = limpiar_numero(num)
     return solo_numeros[-10:] if len(solo_numeros) >= 10 else solo_numeros
 
-def enviar_mensaje_whatsapp(telefono_destino, texto):
+# --- NUEVA FUNCIÓN CON SOPORTE PARA BOTONES INTERACTIVOS ---
+def enviar_mensaje_whatsapp(telefono_destino, texto, link_boton=None):
     url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {CLOUD_API_TOKEN}", "Content-Type": "application/json"}
-    data = {"messaging_product": "whatsapp", "to": telefono_destino, "type": "text", "text": {"body": texto}}
-    requests.post(url, headers=headers, json=data)
+    
+    if link_boton:
+        # Enviamos un Botón CTA interactivo que esconde el link
+        data = {
+            "messaging_product": "whatsapp",
+            "to": telefono_destino,
+            "type": "interactive",
+            "interactive": {
+                "type": "cta_url",
+                "body": { "text": texto },
+                "action": {
+                    "name": "cta_url",
+                    "parameters": {
+                        "display_text": "Hablar con asesor",
+                        "url": link_boton
+                    }
+                }
+            }
+        }
+    else:
+        # Texto normal
+        data = {
+            "messaging_product": "whatsapp", 
+            "to": telefono_destino, 
+            "type": "text", 
+            "text": {"body": texto}
+        }
+        
+    res = requests.post(url, headers=headers, json=data)
+    
+    # PLAN B: Si la API de Meta rechaza el botón por la versión de WhatsApp del cliente, mandamos el link en texto normal
+    if res.status_code >= 400 and link_boton:
+        print("Aviso: El botón interactivo falló, aplicando Plan B (Texto).", res.json())
+        texto_fallback = f"{texto}\n\n👉 {link_boton}"
+        data_fallback = {
+            "messaging_product": "whatsapp", 
+            "to": telefono_destino, 
+            "type": "text", 
+            "text": {"body": texto_fallback}
+        }
+        requests.post(url, headers=headers, json=data_fallback)
 
 def registrar_metrica(evento, telefono):
     try:
@@ -147,7 +188,7 @@ def registrar_metrica(evento, telefono):
         
         if res and res[0]:
             t_id = res[0]
-            filas_afectadas = execute_db_query("""
+            execute_db_query("""
                 INSERT INTO tracking_metricas (tanda_id, telefono, evento) 
                 VALUES (%s, %s, %s) 
                 ON CONFLICT (tanda_id, telefono, evento) DO NOTHING
@@ -186,7 +227,6 @@ def revisar_rutinas_de_tiempo():
     try:
         ahora = datetime.now()
         
-        # --- BLOQUE 1: Borrar de Sheets si falla por 48hs ---
         hace_48_horas = ahora - timedelta(hours=48)
         para_borrar = execute_db_query("SELECT id, telefono FROM mensajes WHERE estado='sent' AND fecha < %s", (hace_48_horas,), fetchall=True)
         if para_borrar:
@@ -194,7 +234,6 @@ def revisar_rutinas_de_tiempo():
                 bloquear_numero_en_sheets(telefono)
                 execute_db_query("DELETE FROM mensajes WHERE id=%s", (msg_id,), commit=True)
             
-        # --- BLOQUE 2: CIERRE EXACTO A LOS 60 MINUTOS ---
         hace_1_hora = ahora - timedelta(hours=1)
         para_derivar = execute_db_query("SELECT telefono, historial FROM chat_sesiones WHERE ultima_interaccion < %s", (hace_1_hora,), fetchall=True)
         if para_derivar:
@@ -204,7 +243,7 @@ def revisar_rutinas_de_tiempo():
                     res_vend = execute_db_query("SELECT numero_vendedor, tipo_campana FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), fetchone=True)
                     
                     vendedor_asignado = res_vend[0] if res_vend else "Sin asignar"
-                    campana = res_vend[1] if res_vend else "Campaña"
+                    campana = res_vend[1] if res_vend else "Contacto Orgánico"
                     
                     execute_db_query("""
                         INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
@@ -215,7 +254,7 @@ def revisar_rutinas_de_tiempo():
                     historial = json.loads(historial_str)
                     ultimo_msg_cliente = "Sin mensajes recientes."
                     for msg in reversed(historial):
-                        if msg.get("role") == "user" and "CONTEXTO DE LA CAMPAÑA" not in msg.get("parts", [""])[0]:
+                        if msg.get("role") == "user" and "CONTEXTO" not in msg.get("parts", [""])[0]:
                             ultimo_msg_cliente = msg["parts"][0]
                             break
 
@@ -246,14 +285,56 @@ scheduler.add_job(func=revisar_rutinas_de_tiempo, trigger="interval", minutes=5)
 scheduler.start()
 
 # ==========================================
-# CEREBRO IA: LÓGICA CONDICIONAL DE NOMBRES
+# CEREBRO IA: LÓGICA CONDICIONAL Y ORGÁNICA
 # ==========================================
 def obtener_prompt_personalizado(telefono_cliente_completo):
     tel_10_digitos = extraer_10_digitos(telefono_cliente_completo)
     
     res = execute_db_query("SELECT numero_vendedor, tipo_campana, subtipo, tanda_id FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10_digitos,), fetchone=True)
 
-    numero_db = res[0] if res else None
+    # ==============================================================
+    # 1. CLIENTE ORGÁNICO (Nos habló de la nada)
+    # ==============================================================
+    if not res:
+        return f"""
+Eres el asistente virtual de recepción de WoodTools. 
+Habla en español argentino (usa 'vos', empático y servicial).
+Usa formato de WhatsApp (*negritas* y emojis), NUNCA uses markdown de asteriscos dobles (**).
+
+CONTEXTO:
+Este es un cliente "Orgánico" (nos contactó por su cuenta, de la nada). 
+No tiene un vendedor asignado todavía.
+
+TUS REGLAS DE CHARLA (¡ESTRICTAS!):
+1. Saluda cordialmente y pregúntale en qué lo puedes ayudar.
+2. Tu OBJETIVO ÚNICO es recopilar información para armar esta frase final: "Hola vengo a buscar información sobre [herramienta] para trabajar en [material]".
+   - Pregúntale sutilmente qué herramienta y material necesita.
+3. ELECCIÓN DEL ASESOR: Si el cliente ya conoce a un asesor y lo nombra, envíalo con ese. PERO si el cliente responde de manera ambigua (ej: "con cualquiera", "me da igual", "no lo sé", "el que esté libre"), DEBES ELEGIR Y RECOMENDAR OBLIGATORIAMENTE A UNO DE ESTOS TRES ASESORES AL AZAR: Carlos, Valentín o Emmanuel.
+4. REGLA DE HIERRO: NO respondes NADA que salga de tu objetivo. NO das precios, NO hablas de envíos, NO haces asesoría técnica. Todo eso lo hará el asesor.
+5. CIERRE NORMAL: Cuando ya tengas la herramienta, el material y el nombre del asesor, despídete cordialmente y mándale el enlace EXACTO de WhatsApp. No escribas nada más después del enlace.
+
+LISTA DE ASESORES Y SUS TELÉFONOS (Usa el número exacto del que elijas):
+- Valentín: 5491145394279
+- Emmanuel: 5491157528428
+- Carlos: 5491165630406
+- Ariel: 5491134811771
+- Roberto Golik: 5491164591316
+- Nicolas Saad: 5491157528427
+- Ezequiel Calvi: 5491153455274
+- Alan Calvi: 5491156321012
+- Luis Quevedo: 5491168457778
+
+FORMATO DEL ENLACE AL FINAL (¡Súper Estricto!):
+- Reemplaza [TELEFONO_ASESOR] con el número del asesor elegido.
+- Codifica todos los espacios del texto con '%20'.
+El enlace EXACTO debe ir AL FINAL de tu mensaje, separado por un espacio, así:
+https://woodtools-webhook.onrender.com/wa/ORGANICO/{tel_10_digitos}/[TELEFONO_ASESOR]?text=Hola%20vengo%20a%20buscar%20informaci%C3%B3n%20sobre%20[herramienta]%20para%20trabajar%20en%20[material]
+"""
+
+    # ==============================================================
+    # 2. CLIENTE DE CAMPAÑA (Ya está en la base)
+    # ==============================================================
+    numero_db = res[0]
     if numero_db in ["0", "", "Sin asignar", None]:
         numero_db = None
 
@@ -307,25 +388,25 @@ El cliente está respondiendo a una campaña del tipo "{tipo_camp}".
 EL VENDEDOR ASIGNADO:
 El vendedor asignado a este cliente se llama: {nombre_vendedor_ia}
 El número de WhatsApp de este vendedor es: {tel_vend}
-(MUY IMPORTANTE: Si el nombre es "tu asesor", referite a él genéricamente de esa forma en todo momento. NUNCA inventes ni supongas nombres propios. Por ejemplo, debes decir "Así le avisamos a tu asesor" y JAMÁS "Así le avisamos a Valentín").
+(MUY IMPORTANTE: Si el nombre es "tu asesor", referite a él genéricamente de esa forma en todo momento. NUNCA inventes ni supongas nombres propios).
 
 TUS REGLAS DE CHARLA (¡ESTRICTAS!):
 1. Saluda cordialmente (ESTÁ PROHIBIDO USAR LA PALABRA "CAMPAÑA").
 2. Tu OBJETIVO ÚNICO es obtener la información necesaria para armar esta frase: "{frase_link}".
    - Si la frase tiene [herramienta] y [material], pregúntale ambas cosas al cliente de forma sutil y directa.
    - Si la frase NO tiene corchetes o solo pide [Vendedor], NO preguntes por herramientas.
-3. REGLA DE HIERRO: NO respondes NADA que salga de tu objetivo. NO das precios, NO hablas de envíos, NO das información de stock, NO haces asesoría técnica.
-4. ¿QUÉ HACER SI PREGUNTAN OTRA COSA?: Si el cliente hace CUALQUIER pregunta técnica o comercial fuera de decirte qué herramienta/material usa, CORTAS EL CHAT respondiendo EXACTAMENTE esto:
-   "Esa es una gran pregunta técnica. Te voy a derivar con {nombre_vendedor_ia} para que te brinde esa información precisa. Hacé clic en este enlace para hablar con él 👉 https://woodtools-webhook.onrender.com/go/{tanda_id}/{tel_10_digitos}/{tel_vend}?text=Hola,%20tengo%20una%20consulta"
-   (No respondas nada más, solo esa derivación).
-5. CIERRE NORMAL: Una vez que el cliente te dé el material y la herramienta (o los datos que pediste), dile que {nombre_vendedor_ia} lo va a ayudar, despídete y mándale el link con la frase completa.
+3. REGLA DE HIERRO: NO respondes NADA que salga de tu objetivo. NO das precios, NO hablas de envíos, NO haces asesoría técnica.
+4. ¿QUÉ HACER SI PREGUNTAN OTRA COSA?: Si el cliente hace CUALQUIER pregunta técnica o comercial fuera de tu objetivo, CORTAS EL CHAT respondiendo EXACTAMENTE esto:
+   "Esa es una gran pregunta técnica. Te voy a derivar con {nombre_vendedor_ia} para que te brinde esa información precisa."
+   Y le sumas el enlace al final del mensaje.
+5. CIERRE NORMAL: Una vez que el cliente te dé los datos, dile que {nombre_vendedor_ia} lo va a ayudar, despídete y mándale el enlace EXACTO.
 
-FORMATO DEL LINK A WHATSAPP PARA EL CIERRE:
+FORMATO DEL ENLACE AL FINAL (¡Súper Estricto!):
 - Reemplaza [herramienta] y [material] con lo que te pidió.
 - Si la frase incluye [Vendedor], reemplázalo con {nombre_vendedor_ia}.
 - Codifica los espacios con '%20'.
-El link EXACTO debe construirse así (respeta la estructura de la URL):
-https://woodtools-webhook.onrender.com/go/{tanda_id}/{tel_10_digitos}/{tel_vend}?text=[FRASE_COMPLETADA_Y_CODIFICADA]
+El enlace EXACTO debe ir AL FINAL de tu mensaje, separado por un espacio, así:
+https://woodtools-webhook.onrender.com/wa/{tanda_id}/{tel_10_digitos}/{tel_vend}?text=[FRASE_COMPLETADA_Y_CODIFICADA]
 """
 
 def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
@@ -349,13 +430,24 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
         model = genai.GenerativeModel('gemini-2.5-flash')
         chat = model.start_chat(history=historial[:-1])
         respuesta = chat.send_message(texto_entrante)
-        texto_respuesta = respuesta.text
         
-        # SI LA IA DERIVA AL CLIENTE (PASA CUALQUIER LINK), CERRAMOS LA SESIÓN
-        if "Te voy a derivar con" in texto_respuesta or "/go/" in texto_respuesta or "wa.me" in texto_respuesta:
+        texto_respuesta = respuesta.text
+        texto_limpio = texto_respuesta
+        link_extraido = None
+        
+        # --- DETECTAMOS Y EXTRAEMOS EL ENLACE DEL TEXTO DE GEMINI ---
+        match = re.search(r'(https://woodtools-webhook\.onrender\.com/wa/\S+)', texto_respuesta)
+        if match:
+            link_extraido = match.group(1)
+            # Removemos el link y frases molestas apuntando al link, porque ahora será un botón
+            texto_limpio = texto_respuesta.replace(link_extraido, "").strip()
+            texto_limpio = texto_limpio.replace("👉", "").replace("Hacé clic en este enlace para hablar con él", "").strip()
+        
+        # SI LA IA DERIVA AL CLIENTE (HAY LINK O MENCIONA DERIVACIÓN), CERRAMOS LA SESIÓN
+        if link_extraido or "Te voy a derivar con" in texto_respuesta:
             tel_10 = extraer_10_digitos(telefono_cliente)
             res_vend = execute_db_query("SELECT numero_vendedor FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), fetchone=True)
-            vendedor_asignado = res_vend[0] if res_vend else "Sin asignar"
+            vendedor_asignado = res_vend[0] if res_vend else "Orgánico / Asignado por IA"
             
             historial.append({"role": "model", "parts": [texto_respuesta]})
             
@@ -375,7 +467,8 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
                 DO UPDATE SET historial = EXCLUDED.historial, ultima_interaccion = EXCLUDED.ultima_interaccion, advertido = 0
             """, (telefono_cliente, json.dumps(historial), datetime.now()), commit=True)
             
-        enviar_mensaje_whatsapp(telefono_cliente, texto_respuesta)
+        # ENVIAMOS EL MENSAJE FINAL AL CLIENTE (Si detectó link, le arma el botón mágico)
+        enviar_mensaje_whatsapp(telefono_cliente, texto_limpio, link_boton=link_extraido)
         
     except Exception as e:
         print(f"Error con Gemini: {e}")
@@ -386,27 +479,28 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (PostgreSQL Pool) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (Botones Interactivos) 🚀", 200
 
 # --- ESTA ES LA RUTA QUE RASTREA EL CLIC Y ABRE LA APP DIRECTO ---
-@app.route('/go/<tanda_id>/<telefono_cliente>/<vendedor>', methods=['GET'])
+@app.route('/wa/<tanda_id>/<telefono_cliente>/<vendedor>', methods=['GET'])
 def redirect_whatsapp(tanda_id, telefono_cliente, vendedor):
     texto = request.args.get('text', '')
     try:
-        res = execute_db_query("""
-            INSERT INTO tracking_metricas (tanda_id, telefono, evento) 
-            VALUES (%s, %s, %s) 
-            ON CONFLICT (tanda_id, telefono, evento) DO NOTHING
-        """, (tanda_id, telefono_cliente, 'clicked_link'), commit=True)
-        
-        if res and res > 0:
-            execute_db_query("UPDATE metricas_campanas SET derivados = derivados + 1 WHERE tanda_id = %s", (tanda_id,), commit=True)
+        # Solo sumamos a las métricas si el click NO vino de un chat orgánico
+        if tanda_id != "ORGANICO":
+            res = execute_db_query("""
+                INSERT INTO tracking_metricas (tanda_id, telefono, evento) 
+                VALUES (%s, %s, %s) 
+                ON CONFLICT (tanda_id, telefono, evento) DO NOTHING
+            """, (tanda_id, telefono_cliente, 'clicked_link'), commit=True)
+            
+            if res and res > 0:
+                execute_db_query("UPDATE metricas_campanas SET derivados = derivados + 1 WHERE tanda_id = %s", (tanda_id,), commit=True)
     except Exception as e:
         print(f"Error tracking click: {e}")
         
     texto_codificado = urllib.parse.quote(texto)
     
-    # Redirección inteligente: Intenta abrir la app de WhatsApp directo, si falla usa Web
     html = f"""
     <!DOCTYPE html>
     <html lang="es">
@@ -422,10 +516,7 @@ def redirect_whatsapp(tanda_id, telefono_cliente, vendedor):
         </style>
         <script>
             window.onload = function() {{
-                // 1. Intenta abrir la app directamente usando el Deep Link
                 window.location.replace("whatsapp://send?phone={vendedor}&text={texto_codificado}");
-                
-                // 2. Plan de respaldo: Si a los 2 segundos la app no se abrió, va a la web
                 setTimeout(function() {{
                     window.location.replace("https://wa.me/{vendedor}?text={texto_codificado}");
                 }}, 2000);
