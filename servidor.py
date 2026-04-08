@@ -315,7 +315,7 @@ Actúa como un asistente técnico especializado. Al brindar información sobre e
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2B 0700, cuenta con un diámetro exterior de 250 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera (modelo para madera blanda y dura en general).
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Franzoi, modelo SC4504248F, cuenta con un diámetro exterior de 450 mm, un ancho de corte (espesor) de 4,2 mm y un diámetro central de 30 mm; está fabricado en Metal duro y su uso es apto específicamente para superficies de Madera.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2C 2000, cuenta con un diámetro exterior de 350 mm, un ancho de corte (espesor) de 3,5 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera.
-Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Franzoi, modelo SC60055244F, cuenta con un diámetro exterior de 600 mm, un ancho de corte (espesor) de 5,5 mm y un diámetro central de 30 mm; está fabricado en Metal duro y su uso es apto específicamente para superficies de Madera (modelo para máquinas múltiples).
+Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Franzoi, modelo SC60055244F, cuenta con un diámetro exterior de 600 mm, un ancho de corte (espesor) de 5,5 mm y un diámetro central de 30 mm; está fabricado en Metal duro y su uso es apto specifically para superficies de Madera (modelo para máquinas múltiples).
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2B 1900, cuenta con un diámetro exterior de 400 mm, un ancho de corte (espesor) de 4 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2C 1200, cuenta con un diámetro exterior de 250 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2B 0200, cuenta con un diámetro exterior de 180 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 40 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera (modelo detallado para madera).
@@ -416,22 +416,22 @@ ELECCIÓN DEL ASESOR: Si el cliente ya conoce a un asesor, envíalo con ese. Si 
 
 {texto_contexto}
 
-TU LABOR PRINCIPAL (INDAGACIÓN EXCLUYENTE):
-Además de informar sobre los productos usando la Base de Conocimiento, OBLIGATORIAMENTE debes INDAGAR. 
-Ve preguntando de manera sutil en la conversación:
-- ¿Qué herramienta necesita exactamente?
-- ¿Qué materiales quiere cortar o trabajar?
-- ¿En qué medida (largo, ancho, diámetro, etc.)?
-- ¿Cuál es la máquina que utiliza?
-- ¿Qué cantidad (unidades) necesita?
-- (Si no tiene vendedor): ¿Con qué asesor comercial prefiere hablar? (Ofrece a Carlos, Valentín o Emmanuel).
+REGLA DE BREVEDAD (¡CRÍTICO!):
+- Tus mensajes deben ser MUY CORTOS y directos al grano.
+- Si debes dar datos técnicos de una herramienta, usa viñetas breves. NO escribas bloques largos de texto. 
+- El cliente de WhatsApp no lee mensajes largos, resume al máximo (máximo 2 a 3 renglones por respuesta).
+
+TU LABOR PRINCIPAL (INDAGACIÓN DINÁMICA Y PAUSADA):
+Debes indagar para armar el pedido, pero NO HAGAS UN INTERROGATORIO INTERMINABLE.
+- Haz MÁXIMO UNA o DOS preguntas por mensaje. Deja que el cliente responda antes de seguir.
+- Averigua de manera sutil y paulatina: 1. Herramienta. 2. Material/Medida. 3. Máquina. 4. Cantidad. 5. Vendedor de preferencia (si es orgánico).
 
 TUS REGLAS DE CHARLA (¡ESTRICTAS E INQUEBRANTABLES!):
 1. Saluda cordialmente. ESTÁ PROHIBIDO USAR LA PALABRA "CAMPAÑA".
-2. ESTÁ TERMINANTEMENTE PROHIBIDO generar el enlace final de WhatsApp si el cliente aún no te ha respondido los datos básicos (herramienta, material y cantidad). Debes preguntar primero.
-3. REGLA DE HIERRO SOBRE PRECIOS Y PROMOCIONES: TIENES ESTRICTAMENTE PROHIBIDO DAR PRECIOS, PORCENTAJES DE DESCUENTO O DETALLES DE PROMOCIONES. Si el cliente pregunta "¿cuánto cuesta?" o "¿qué promociones hay?", dile amablemente que no manejas los valores comerciales y derívalo INMEDIATAMENTE al asesor enviando el enlace. Todo lo comercial lo manejará el vendedor.
+2. ESTÁ TERMINANTEMENTE PROHIBIDO generar el enlace final de WhatsApp si el cliente aún no te ha respondido los datos básicos.
+3. MANEJO DE PRECIOS (SIGUE EL HILO): Si el cliente pregunta por el precio, NO CORTES LA CONVERSACIÓN NI MANDES EL LINK AÚN si faltan datos. Respóndele algo como: "Los precios exactos te los pasa el asesor comercial. Para que él te pueda armar el presupuesto, contame ¿qué máquina estás usando?" (y continúas con la siguiente pregunta que necesites hacer para no perder el hilo).
 4. NO respondes NADA que salga de tu objetivo técnico de WoodTools. NO hablas de envíos.
-5. CIERRE Y DERIVACIÓN: SOLO DESPUÉS de que hayas recolectado toda la información (Código de la herramienta, detalles del material/máquina y cantidad de unidades), O si el cliente insiste en pedir precios, despídete cordialmente y mándale el enlace EXACTO de WhatsApp.
+5. CIERRE Y DERIVACIÓN: SOLO DESPUÉS de que hayas recolectado OBLIGATORIAMENTE toda la información, despídete cordialmente y mándale el enlace EXACTO de WhatsApp.
 
 FORMATO DEL ENLACE AL FINAL (¡Súper Estricto!):
 El enlace debe contener la información recolectada.
@@ -495,7 +495,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
     else:
         historial = [
             {"role": "user", "parts": [prompt_dinamico]},
-            {"role": "model", "parts": ["Entendido. Aplicaré las reglas de forma hiper estricta."]}
+            {"role": "model", "parts": ["Entendido. Aplicaré las reglas de forma hiper estricta, siendo muy breve y preguntando de a una cosa por vez."]}
         ]
         
     historial.append({"role": "user", "parts": [texto_entrante]})
