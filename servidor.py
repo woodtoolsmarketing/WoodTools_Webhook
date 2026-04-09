@@ -400,6 +400,10 @@ Genera una descripción comercial técnica y atractiva para un catálogo de herr
 Redacta una descripción técnica y comercial para un catálogo de herramientas sobre las "Cuchillas para cepillado de dorso ranurado" de la marca Italiana (modelo CHCR0100404), destacando la seguridad y precisión de su sistema de sujeción; especifica que la hoja tiene una altura/ancho de 40 mm y un espesor de 4 mm, y menciona que está disponible en las siguientes longitudes (en mm): 25, 30, 40, 50, 60, 80, 100, 130, 150, 160, 180, 230, 240, 320 y 650, resaltando finalmente la durabilidad del material para uso industrial.
 Redacta una descripción técnica y comercial para un catálogo de herramientas sobre las "Cuchillas para cepillado de dorso ranurado" de la marca Italiana (modelo CHCR0100505), destacando la seguridad y precisión de su sistema de sujeción; especifica que la hoja tiene una altura/ancho de 50 mm y un espesor de 4 mm, y menciona que está disponible en las siguientes longitudes (en mm): 25, 30, 40, 50, 60, 80, 100, 130, 150, 160, 180, 230, 240, 320 y 650, resaltando finalmente la durabilidad del material para uso industrial.
 Redacta una descripción técnica y comercial para un catálogo de herramientas sobre las "Cuchillas para cepillado de dorso ranurado" de la marca Italiana (modelo CHCR0100604), destacando la seguridad y precisión de su sistema de sujeción; especifica que la hoja tiene una altura/ancho de 60 mm y un espesor de 4 mm, y menciona que está disponible en las siguientes longitudes (en mm): 25, 30, 40, 50, 60, 80, 100, 130, 150, 160, 180, 230, 240, 320 y 650, resaltando finalmente la durabilidad del material para uso industrial.
+
+ENVÍOS Y AFILADOS
+- Envíos: Si el cliente pregunta por envíos o de dónde somos, averigua de qué zona es. Si es de CABA (Capital Federal) o GBA (Gran Buenos Aires y cualquiera de sus barrios), dile que el envío se puede arreglar directamente con el vendedor. Si es de cualquier otra parte (interior del país), indícale que hacemos envíos mediante Vía Cargo o Credifin.
+- Afilados: Si el cliente pregunta si hacemos servicio de afilado, indícale que SÍ los realizamos, que la demora estimada es de entre 2 y 5 días. La logística aplica igual que en los envíos (CABA/GBA se arregla con el vendedor, interior por Vía Cargo o Credifin).
 """
 
 def obtener_prompt_personalizado(telefono_cliente_completo):
@@ -446,7 +450,7 @@ REGLAS DE INDAGACIÓN Y SALUDO (CÓMO PREGUNTAR):
 3. ¡CERO INTERROGATORIOS! Si el cliente NO SABE un dato, NO INSISTAS. Dile que no hay problema y avanza.
 4. Tu objetivo es saber: Herramienta, Material (salvo que pida incisor, ahí asumes melamina), Medida/Máquina y Cantidad.
 5. (Solo si es orgánico): PREGUNTAR OBLIGATORIAMENTE qué asesor prefiere (Carlos, Valentín o Emmanuel).
-6. POST-DERIVACIÓN (MEMORIA): Si ya enviaste el link de "Hablar con asesor" en el mensaje anterior y el cliente insiste con el precio, ESTÁ PROHIBIDO volver a preguntarle qué herramienta necesita o reiniciar el proceso. SOLO dile: "Como te comentaba, los precios te los pasa el asesor comercial. ¡Hacé clic en el enlace que te envié arriba para charlar con él!" y NO HAGAS MÁS PREGUNTAS.
+6. POST-DERIVACIÓN (MEMORIA): Si ya enviaste el link de "Hablar con asesor" en el mensaje anterior y el cliente insiste con el precio u otras cosas, ESTÁ PROHIBIDO volver a preguntarle qué herramienta necesita o reiniciar el proceso. SOLO dile: "Como te comentaba, los detalles y precios te los pasa el asesor comercial. ¡Hacé clic en el enlace que te envié arriba para charlar con él!" y NO HAGAS MÁS PREGUNTAS.
 
 CIERRE Y ENLACE FINAL (DERIVACIÓN):
 1. NO PIDAS PERMISO PARA DERIVAR. Cuando tengas la info, asume el cierre, despídete y manda el enlace sin pedir autorización.
@@ -514,7 +518,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
     else:
         historial = [
             {"role": "user", "parts": [prompt_dinamico]},
-            {"role": "model", "parts": ["Entendido. Cumpliré todas las reglas a la perfección, incluyendo las restricciones de material y medidas."]}
+            {"role": "model", "parts": ["Entendido. Seré muy breve, haré una sola pregunta a la vez, no daré precios, mantendré el enlace con la estructura correcta y responderé correctamente sobre afilados y envíos."]}
         ]
         
     historial.append({"role": "user", "parts": [texto_entrante]})
@@ -573,7 +577,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (Versión Segura Anti-Códigos) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (Envíos y Afilados) 🚀", 200
 
 @app.route('/wa/<tanda_id>/<telefono_cliente>/<vendedor>', methods=['GET'])
 def redirect_whatsapp(tanda_id, telefono_cliente, vendedor):
