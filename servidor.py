@@ -12,6 +12,8 @@ import json
 import psycopg2 
 from psycopg2 import pool 
 import re 
+import io
+from PIL import Image
 
 app = Flask(__name__)
 
@@ -168,6 +170,24 @@ def enviar_mensaje_whatsapp(telefono_destino, texto, link_boton=None):
         data_fallback = {"messaging_product": "whatsapp", "to": telefono_destino, "type": "text", "text": {"body": texto_fallback}}
         requests.post(url, headers=headers, json=data_fallback)
 
+def descargar_imagen_whatsapp(media_id):
+    """Descarga la imagen desde los servidores de Meta usando el Token"""
+    try:
+        url_meta = f"https://graph.facebook.com/v18.0/{media_id}"
+        headers = {"Authorization": f"Bearer {CLOUD_API_TOKEN}"}
+        res_info = requests.get(url_meta, headers=headers)
+        
+        if res_info.status_code == 200:
+            media_url = res_info.json().get('url')
+            if media_url:
+                res_img = requests.get(media_url, headers=headers)
+                if res_img.status_code == 200:
+                    return Image.open(io.BytesIO(res_img.content))
+        return None
+    except Exception as e:
+        print(f"Error descargando imagen: {e}")
+        return None
+
 def registrar_metrica(evento, telefono):
     try:
         tel_10 = extraer_10_digitos(telefono)
@@ -301,17 +321,7 @@ Si dice melamina (y no mencionó incisor), preguntar si la utiliza CON o SIN inc
 En caso de querer cortar madera recomendar las herramientas y utiliza la información de sierras circulares que cortan madera. Decirle que son para todo tipo de máquinas. ATENCIÓN: Las sierras marca Franzoi NO son aptas para máquinas de mano (solo múltiples o seccionadoras). Para máquinas de mano ofrecer EXCLUSIVAMENTE marca Freud. Usa internamente los códigos LG2A 2100, LG2B 1100, LG2A 1700, SC4505204F, SC3004164F, LG2A 2800, LU2A 1600, LU1D 0500, LU2A 2500, SC35045244F, LU2B 0700, SC4504248F, LU2C 2000, LU2A 0700, LU2B 1600, LU2B 1900, LU2C 1200, LU2C 1500, LU2A 3100, LU2A 0800, LU2A 3300, LU2C 1200, FI14M AA3, LU2B 2100, LU2B 0200, LU2A 0800, LU2A 0500.
 ⚠️ NUEVO: ALUMINIO, NO FERROSOS Y PLÁSTICOS ⚠️
 Si el cliente busca sierras para cortar Aluminio, No Ferrosos, Plásticos o Plexiglass, SÍ VENDEMOS. Ofrece las sierras circulares marca Freud diseñadas específicamente para esto. 
-Usa INTERNAMENTE estos códigos: 
-- LU4A 0100 (250mm, 80 dientes, especial Plásticos)
-- LU4A 0200 (300mm, 96 dientes, especial Plexiglass)
-- LU5B 0300 (250mm, 80 dientes)
-- LU5B 2200 (400mm, 120 dientes)
-- LU5B 2800 (450mm, 128 dientes)
-- LU5B 3200 (500mm, 140 dientes)
-- LU5B 3800 (550mm, 148 dientes)
-- LU5D 0900 (250mm, 80 dientes)
-- LU5D 1800 (350mm, 108 dientes)
-- LU5E 0600 (300mm, 120 dientes)
+Usa INTERNAMENTE estos códigos: LU4A 0100 (250mm, 80d), LU4A 0200 (300mm, 96d), LU5B 0300 (250mm, 80d), LU5B 2200 (400mm, 120d), LU5B 2800 (450mm, 128d), LU5B 3200 (500mm, 140d), LU5B 3800 (550mm, 148d), LU5D 0900 (250mm, 80d), LU5D 1800 (350mm, 108d), LU5E 0600 (300mm, 120d).
 
 Actúa como un asistente técnico especializado al brindar información sobre este ítem, básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LG3D 0600, cuenta con un diámetro exterior de 300 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Melamina.
 Actúa como un asistente técnico al brindar información sobre este ítem, básate estrictamente en los siguientes datos técnicos extraídos de su ficha: es un producto de marca Freud, modelo LU3f-0200 250 Z80, cuenta con un diámetro exterior de 250 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Widia y su uso es apto específicamente para superficies de Melamina.
@@ -354,7 +364,12 @@ Actúa como un asistente técnico especializado. Al brindar información sobre e
 
 FRESAS
 ⚠️ REGLA DE MATERIAL PARA FRESAS: Ten en cuenta que TODAS las fresas son ÚNICAMENTE PARA MADERA. La única excepción son las fresas que tengan "6 dientes" o "Z6", las cuales sirven tanto para MADERA como para MELAMINA.
-A la hora de ofrecer fresas preguntar qué está buscando hacer, en caso de estar buscando hacer canales o ranuras ofrecerle fresas rectas y sus códigos son todos los que lleven FRS o FRG, en caso de que busque cepillado ofrecerle las que su código empiece en CB, en caso de que busque angulares ofrecerle las que su código empiece en FA, en caso de que busque moldura ofrecerle las que su código empiece en F04C0, F2C, FZS, FR104/156, JFRD, JFFI, JFMS, JFMD, JFMP, JFMP3416G, JFMP34166M, JFDE, JFDSG, FRP5533, JFMPV14, FCPV, JFMPVR, JPMS10 y FP402, en caso de que esté buscando para encastre ofrecerle las que su código empiece en JFE, FG46S y en caso de estar buscando radiales ofrecerle todas las que empiece en FRM04.
+A la hora de ofrecer fresas OBLIGATORIAMENTE DEBES PREGUNTAR PRIMERO si están buscando fresas RECTAS, de CEPILLADO o de MOLDURA.
+1. Si dice RECTAS: Pregúntale la cantidad de dientes que busca. SÓLO si te dice que son de "6 dientes", pregúntale el material que va a cortar (ya que sirven para madera y melamina). Para cualquier otra cantidad de dientes, ASUME DIRECTAMENTE que es para madera y NO preguntes el material. (Códigos FRS o FRG).
+2. Si dice CEPILLADO: Ofrécele cabezales cepilladores (códigos CB...).
+3. Si dice MOLDURA (o angulares, encastre, etc.): Ofrécele las opciones de moldura (códigos F04C0, F2C, FZS, FR104/156, JFRD, JFFI, JFMS, JFMD, JFMP, JFMP3416G, JFMP34166M, JFDE, JFDSG, FRP5533, JFMPV14, FCPV, JFMPVR, JPMS10, FP402). 
+Para encastre (JFE, FG46S) o radiales (FRM04). TODAS estas (salvo las de 6 dientes rectas) asumen que son exclusivamente para madera.
+
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresas Rectas HM" y manteniendo el código "FRS0054/1006" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) variable de 5 a 100 mm, un Diámetro interior (d) de 40 mm y está disponible con un número de dientes (Z) de 4 o 6, sin dientes incisores (R); se trata de una fresa con cortantes rectos en HM diseñada específicamente para ranurar, cepillar o realizar rebajes, contando con ángulo axial a partir de los 20 mm de ancho de corte.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresas Rectas con Incisores HM" y manteniendo el código "FRSI01542/10066" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) variable de 15 a 100 mm, un Diámetro interior (d) de 40 mm, está disponible con un número de dientes (Z) de 4 o 6 y cuenta con dientes incisores (R) que varían de 2 a 6; se destaca por tener cortantes rectos con ángulo axial e incisores en HM, diseñada específicamente para ranurar sin astillar.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresas para Ranurar Regulables HM" y manteniendo los códigos "FRG0510" y "FRG1039" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 160 mm y un Diámetro interior (d) de 40 mm, y cuentan con 4 dientes incisores (R); están disponibles en dos variantes principales según su capacidad de regulación: una para un Ancho de corte (B) de 5 a 10 mm (con disposición de dientes Z de 2x4 y un ancho de corte del diente (b) de 5 mm) y otra para un Ancho de corte (B) de 10 a 39 mm (con disposición de dientes Z de 3x4 y un ancho de corte del diente (b) de 10 mm); se describe como un juego de fresas regulables con cortantes en HM diseñadas específicamente para realizar ranuras, rebajes y espigas.
@@ -363,7 +378,7 @@ Actúa como un asistente experto en herramientas de carpintería y utiliza la si
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresas 1/4 círculo cóncavo y convexo HM" y manteniendo los códigos "F04C014", "F04C016", "F04C054" y "F04C056" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 150 mm y un Diámetro interior (d) de 40 mm; están disponibles con un número de dientes (Z) de 4 o 6 y varían en su Ancho de corte (B) ofreciendo opciones de 1/2" a 3/4" y de 3/4" a 1 1/4"; se describen como fresas con cortantes en HM y ángulo axial diseñadas para efectuar trabajos de 1/4 de círculo cóncavo o convexo en formas A, B, C o D.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresas 1/2 círculo cóncavo y convexo HM" y manteniendo los códigos "F2C014", "F2C054", "F2C104", "F2C154", "F2C204" y "F2C254" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 150 mm y un Diámetro interior (d) de 40 mm, están disponibles con un número de dientes (Z) de 4 o 6 y ofrecen diversas opciones de Ancho de corte (B) que incluyen 1/2", 5/8", 3/4", 1", 1 1/2" y 2"; se describen como fresas con cortantes en HM diseñadas específicamente para efectuar figuras de medio círculo cóncavo o convexo.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Zócalo Simple y Contramarco HM" y manteniendo los códigos "FZS128" y "FZS129" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) de 1/2" a 3/4" y un Diámetro interior (d) de 40 mm, contando con un número de dientes (Z) de 4; el producto ofrece dos variantes funcionales: una configuración para efectuar zócalos que combina una fresa A y una fresa B (código FZS128), y una configuración para efectuar contramarcos que utiliza dos fresas A (código FZS129); se describen como herramientas con cortantes en HM diseñadas específicamente para la fabricación de estas molduras.
-Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Rinconera Simple HM" y manteniendo el código "FR104/156" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) variable de 3/4" a 1 1/2", un Diámetro interior (d) de 40 mm y está disponible con un número de dientes (Z) de 4 o 6; se describe como una fresa con cortantes en HM diseñada específicamente para efectuar rinconera según los modelos 1 o 2.
+Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Rinconera Simple HM" y manteniendo el código "FR104/156" solo para identification interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) variable de 3/4" a 1 1/2", un Diámetro interior (d) de 40 mm y está disponible con un número de dientes (Z) de 4 o 6; se describe como una fresa con cortantes en HM diseñada específicamente para efectuar rinconera según los modelos 1 o 2.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Rinconera Doble HM" y manteniendo el código "JFRD" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 160 mm, un Ancho de corte (B) de 1" y un Diámetro interior (d) de 40 mm; cuenta con una configuración de dientes (Z) de 2x4 y 1x10, compuesta por fresas con 4 cortantes cada una y una sierra circular con 10 cortantes, todos en HM; está diseñada específicamente para efectuar rinconera doble según los modelos 1 o 2.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Frente Inglés HM" y manteniendo los códigos "JFFI01" y "JFFI05" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 175 mm, un Ancho de corte (B) variable de 1/2" a 1" y un Diámetro interior (d) de 40 mm; cuentan con una configuración de dientes (Z) de 4 x 4 y están disponibles en las variantes A y B; se describen como fresas regulables con 4 cortantes en HM diseñadas específicamente para realizar frente inglés simple y machimbrado.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Machimbre Simple HM" y manteniendo los códigos "JFMS1234" y "JFMS34114" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 155 mm y un Diámetro interior (d) de 40 mm; están disponibles en dos variantes principales según el espesor de trabajo: una para un Ancho de corte (B) de 1/2" a 3/4" con una configuración de dientes (Z) compleja de 5x4 y 1x16, y otra para un Ancho de corte (B) de 3/4" a 1 1/4" con una configuración de dientes (Z) de 6x4; se describen como fresas con cortantes en HM diseñadas específicamente para efectuar machimbre simple biselado o bajo fondo.
@@ -387,20 +402,19 @@ Actúa como un asistente experto en herramientas de carpintería y utiliza la si
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresa para Finger HS" y manteniendo el código "FG46S CB2" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 160 mm, un Ancho de corte (B) de 28,6 mm y un Diámetro interior (d) de 50 mm, contando con una configuración de dientes (Z) de 3+3; se describe como una fresa diseñada para unir madera, normalmente de cabeza, destacándose por permitir alcanzar altas velocidades de trabajo.
 
 MECHAS
-Cuando te pregunten por mechas preguntarle bien que es lo que quiere hacer, en caso de que te diga perforaciones mostrarle mechas ciegas pasantes (para poder identificarlas son las que su código empieza en MPD y MPI) y no pasantes (para poder identificarlas son las que su código empieza en MCD y MCI) y mechas bisagras (para poder identificarlas son las que su código empieza en MBD y MBI) y en caso de que quiera cortar melamina ofrecerle las que son de CNC NESTING.
-Actúa como un asistente técnico experto y utiliza los siguientes datos para gestionar las consultas sobre el modelo MPI y MPD, al cual siempre debes identificar y nombrar ante el cliente como 'Mecha Pasante': se trata de una fresa de la marca Italiana fabricada en metal duro para herramientas eléctricas, la cual cuenta con un cabo o vástago fijo de 10mm en todas sus versiones, y está disponible en stock en los siguientes diámetros de corte (medidas de mecha): 3mm, 4mm, 5mm, 6mm, 7mm, 8mm, 10mm, 12mm y 15mm.
-Actúa como un asistente técnico experto y utiliza los siguientes datos para gestionar las consultas sobre el modelo MCD y MCI, al cual siempre debes identificar y nombrar ante el cliente como 'Mecha Ciega': se trata de una fresa de la marca Italiana fabricada en metal duro para herramientas eléctricas, la cual cuenta con un cabo o vástago fijo de 10mm en todas sus versiones, y está disponible en stock en los siguientes diámetros de corte (medidas de mecha): 3mm, 4mm, 5mm, 6mm, 7mm, 8mm, 10mm, 12mm y 15mm.
-Actúa como un asistente técnico experto y utiliza los siguientes datos para gestionar las consultas sobre el modelo MBD y MBI, al cual siempre debes identificar y nombrar ante el cliente como 'Fresa Bisagra': se trata de una herramienta de la marca Italiana fabricada en Widia (ideal para trabajos en madera), la cual cuenta con un cabo o vástago fijo de 10mm en todas sus versiones, y está disponible en stock en los siguientes diámetros de corte: 12mm, 15mm, 20mm, 25mm, 26mm, 30mm, 35mm y 40mm.
-Actúa como un asistente técnico experto y utiliza los siguientes datos para gestionar las consultas sobre el modelo CNC NESTING, al cual siempre debes identificar y nombrar ante el cliente como 'Fresa para Mesa Nesting': se trata de una herramienta de la marca Italiana fabricada en Carburo de tungsteno (especial para cortes en melamina), la cual cuenta con un cabo o vástago fijo de 10mm en todas sus versiones, y está disponible en stock en un diámetro de corte de 8mm.
+Las mechas que vendemos son de origen Italiano. ⚠️ REGLA ESTRICTA: NUNCA menciones la marca "Nordutensil". Siempre refiérete a ellas como "Mechas Italianas".
+Vienen con vástagos de 8mm, 10mm y 12mm en todas sus versiones (no son de vástago único).
+Cuando te pregunten por mechas, averigua bien qué quieren hacer.
+- Para perforaciones pasantes: Ofrece "Mecha Pasante Italiana" (Códigos MPD y MPI). Diámetros de corte: 3, 4, 5, 6, 7, 8, 10, 12 y 15mm.
+- Para perforaciones ciegas: Ofrece "Mecha Ciega Italiana" (Códigos MCD y MCI). Diámetros de corte: 3, 4, 5, 6, 7, 8, 10, 12 y 15mm.
+- Para bisagras: Ofrece "Fresa Bisagra Italiana" (Códigos MBD y MBI). Diámetros: 12, 15, 20, 25, 26, 30, 35 y 40mm.
+- Para cortar melamina (CNC / Compresión): Ofrece "Fresa Italiana para CNC Nesting" (Código CNC NESTING). Diámetro de corte de 8mm.
 
 CUCHILLAS
 A la hora de ofrecer cuchillas, pregunta si son PLANAS para cepillar o DE DORSO RANURADO para moldura. 
 ⚠️ ATENCIÓN AL CONCEPTO: "Cuchillas de dorso ranurado" es SINÓNIMO EXACTO de "cuchillas para moldurera" o "cuchillas de moldura". Si el cliente dice que quiere cuchillas para moldurera o de moldura, OBLIGATORIAMENTE debes ofrecerle las de "Dorso ranurado". 
-Genera una descripción comercial técnica y atractiva para un catálogo de herramientas sobre el producto "cuchillas planas para cepillar" de la marca Italiana, fabricadas en acero rápido (HSS) basándote en el modelo CHC050420HSS, destacando su resistencia y especificando que cuentan con una medida transversal de 30 mm y están disponibles en formato unitario en la siguiente variedad de largos (en mm): 100, 120, 130, 150, 160, 180, 200, 210, 230, 240, 300, 310, 320, 330, 360, 370, 400, 410, 420, 460, 500, 510, 600, 610, 640, 810 y 1080.
-Genera una descripción comercial técnica y atractiva para un catálogo de herramientas sobre el producto "cuchillas planas para cepillar" de la marca Italiana, fabricadas en acero rápido (HSS) basándote en el modelo CHC050420HSS, destacando su resistencia y especificando que cuentan con una medida transversal de 35 mm y están disponibles en formato unitario en la siguiente variedad de largos (en mm): 100, 120, 130, 150, 160, 180, 200, 210, 230, 240, 300, 310, 320, 330, 360, 370, 400, 410, 420, 460, 500, 510,520, 600, 610, 640, 700, 810 y 1080.
-Redacta una descripción técnica y comercial para un catálogo de herramientas sobre las "Cuchillas para cepillado de dorso ranurado" de la marca Italiana (modelo CHCR0100404), destacando la seguridad y precisión de su sistema de sujeción; especifica que la hoja tiene una altura/ancho de 40 mm y un espesor de 4 mm, y menciona que está disponible en las siguientes longitudes (en mm): 25, 30, 40, 50, 60, 80, 100, 130, 150, 160, 180, 230, 240, 320 y 650, resaltando finalmente la durabilidad del material para uso industrial.
-Redacta una descripción técnica y comercial para un catálogo de herramientas sobre las "Cuchillas para cepillado de dorso ranurado" de la marca Italiana (modelo CHCR0100505), destacando la seguridad y precisión de su sistema de sujeción; especifica que la hoja tiene una altura/ancho de 50 mm y un espesor de 4 mm, y menciona que está disponible en las siguientes longitudes (en mm): 25, 30, 40, 50, 60, 80, 100, 130, 150, 160, 180, 230, 240, 320 y 650, resaltando finalmente la durabilidad del material para uso industrial.
-Redacta una descripción técnica y comercial para un catálogo de herramientas sobre las "Cuchillas para cepillado de dorso ranurado" de la marca Italiana (modelo CHCR0100604), destacando la seguridad y precisión de su sistema de sujeción; especifica que la hoja tiene una altura/ancho de 60 mm y un espesor de 4 mm, y menciona que está disponible en las siguientes longitudes (en mm): 25, 30, 40, 50, 60, 80, 100, 130, 150, 160, 180, 230, 240, 320 y 650, resaltando finalmente la durabilidad del material para uso industrial.
+- Cuchillas Planas para Cepillar: Marca Italiana, Acero Rápido HSS (Código CHC050420HSS). Medidas transversales 30mm y 35mm. Múltiples largos desde 100mm hasta 1080mm.
+- Cuchillas de Dorso Ranurado (Moldurera): Marca Italiana (Códigos CHCR0100404, CHCR0100505, CHCR0100604). Alturas de 40mm, 50mm y 60mm. Espesor de 4mm. Largos de 25 a 650mm.
 
 ENVÍOS Y AFILADOS
 - Envíos: Si el cliente pregunta por envíos o de dónde somos, averigua de qué zona es. Si es de CABA (Capital Federal) o GBA (Gran Buenos Aires y cualquiera de sus barrios), dile que el envío se puede arreglar directamente con el vendedor. Si es de cualquier otra parte (interior del país), indícale que hacemos envíos mediante Vía Cargo o Credifin.
@@ -434,7 +448,7 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
     else:
         nombre_vendedor_ia = "[Elegido_por_ti]"
         tel_vend = "[Tel_Elegido]"
-        texto_contexto = """CONTEXTO: Cliente "Orgánico". Sin vendedor asignado. PREGUNTA OBLIGATORIAMENTE con qué asesor prefiere hablar (Carlos, Valentín o Emmanuel). Si después de preguntarle te dice que "cualquiera" o "no sé", ELIGE TÚ UNO AL AZAR ENTRE: Carlos (5491165630406), Valentín (5491145394279) o Emmanuel (5491157528428). NUNCA asumas un vendedor sin haberle preguntado primero."""
+        texto_contexto = """CONTEXTO: Cliente "Orgánico". Sin vendedor asignado. PREGUNTA OBLIGATORIAMENTE con qué asesor prefiere hablar (Carlos, Valentín o Emmanuel). Si después de preguntarle te dice que "cualquiera", "no sé" o "me da lo mismo", ELIGE TÚ UNO AL AZAR ENTRE: Carlos (5491165630406), Valentín (5491145394279) o Emmanuel (5491157528428). NUNCA asumas un vendedor sin haberle preguntado primero y NUNCA dejes el código de teléfono en blanco o mal formado."""
 
     return f"""
 {BASE_CONOCIMIENTO}
@@ -443,16 +457,19 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
 
 REGLAS DE FORMATO Y BREVEDAD (¡CRÍTICO Y OBLIGATORIO!):
 1. Tus respuestas deben ser MUY CORTAS y naturales. Máximo 2 a 3 renglones en total. El usuario de WhatsApp no lee textos largos.
-2. NO listes características técnicas completas a menos que el cliente lo pida expresamente. Limítate a decir SÓLO la medida del diámetro exterior y la cantidad de dientes.
+2. PROHIBIDO DAR FICHAS TÉCNICAS. NO menciones espesores, ni diámetros centrales, ni material de fabricación en tus respuestas a menos que el cliente haga una pregunta técnica directa. Di SOLO la marca, el tipo de herramienta y el diámetro exterior (y dientes si aplica). 
+3. UNIDADES DE MEDIDA: Si el cliente te da un número para una medida y no especifica, pregúntale si son centímetros (cm) o milímetros (mm). Recuerda que el catálogo está en milímetros por defecto, así que haz la conversión interna (Ej: 30 cm = 300 mm) para saber qué ofrecerle.
 
-REGLAS DE INDAGACIÓN Y SALUDO (CÓMO PREGUNTAR):
+REGLAS DE INDAGACIÓN Y SALUDO:
 1. SALUDO INICIAL: Tu primer mensaje debe ser OBLIGATORIA Y EXACTAMENTE este: "Hola, bienvenido a tu asesor de WoodTools ¿Cual es la herramienta que estas buscando?". NO agregues más cosas al saludo.
 2. Haz SOLO UNA PREGUNTA por mensaje. No agobies al cliente con múltiples preguntas a la vez. Espera siempre a que te conteste para seguir.
 3. ¡CERO INTERROGATORIOS! Si el cliente NO SABE un dato, NO INSISTAS. Dile que no hay problema y avanza.
-4. UNIDADES DE MEDIDA: Si el cliente te da un número para una medida (por ejemplo de largo) y no especifica, pregúntale si son centímetros (cm) o milímetros (mm). Recuerda que el catálogo está en milímetros por defecto, así que haz la conversión interna (Ej: 30 cm = 300 mm) para saber qué ofrecerle.
-5. Tu objetivo es saber: Herramienta, Material, Medida/Máquina y Cantidad.
-6. (Solo si es orgánico): PREGUNTAR OBLIGATORIAMENTE qué asesor prefiere (Carlos, Valentín o Emmanuel).
-7. POST-DERIVACIÓN (MEMORIA): Si ya enviaste el link en el mensaje anterior y el cliente insiste, SOLO dile: "Como te comentaba, los detalles y precios te los pasa el asesor comercial. ¡Hacé clic en el enlace que te envié arriba para charlar con él!" y NO HAGAS MÁS PREGUNTAS.
+4. Tu objetivo general es saber: Herramienta, Material, Medida/Máquina y Cantidad.
+5. (Solo si es orgánico): PREGUNTAR OBLIGATORIAMENTE qué asesor prefiere (Carlos, Valentín o Emmanuel).
+
+REGLA DE MEMORIA PERMANENTE (EL HILO CONDUCTOR):
+1. Si el cliente pregunta "¿cuánto vale?" y AÚN FALTAN DATOS (ej: faltan cantidades, falta elegir vendedor, etc), NO CORTES LA CHARLA mandando el enlace. Mantén el hilo diciendo: "Los precios te los pasa el asesor. Para que pueda armarte el presupuesto, contame [siguiente pregunta]".
+2. SI YA DERIVASTE AL CLIENTE (ya enviaste el link en un mensaje anterior): Si el cliente sigue preguntando o agregando herramientas, ESTÁ TOTALMENTE PROHIBIDO VOLVER A PREGUNTAR por el asesor o intentar reiniciar el formulario. SÓLO dile muy amablemente: "Como te comentaba, los detalles exactos y los precios te los pasa el asesor. ¡Hacé clic en el enlace que te envié arriba para charlar con él!" y CIERRA tu respuesta ahí, sin hacer ninguna otra pregunta.
 
 CIERRE Y ENLACE FINAL (DERIVACIÓN ACUMULATIVA):
 1. NO PIDAS PERMISO PARA DERIVAR. Asume el cierre, despídete y manda el enlace.
@@ -464,8 +481,8 @@ El enlace EXACTO debe copiar y pegar esta estructura literal (reemplazando solo 
 https://woodtools-webhook.onrender.com/wa/{tanda_id}/{tel_10_digitos}/[PONER_AQUI_TELEFONO_ASESOR]?text=Hola,%20necesito%20cotizar:%20[CODIGO]%20-%20[INFO]%20-%20[CANTIDAD]%20unidades
 """
 
-def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
-    if texto_entrante.strip().lower() in ["reset", "resetear", "reiniciar"]:
+def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=None):
+    if texto_entrante and texto_entrante.strip().lower() in ["reset", "resetear", "reiniciar"]:
         tel_10 = extraer_10_digitos(telefono_cliente)
         res_hist = execute_db_query("SELECT historial FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), fetchone=True)
         if res_hist:
@@ -520,15 +537,24 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
     else:
         historial = [
             {"role": "user", "parts": [prompt_dinamico]},
-            {"role": "model", "parts": ["Entendido. Guardaré en mi memoria todos los servicios adicionales (afilado, envío) para incluirlos obligatoriamente en el enlace final."]}
+            {"role": "model", "parts": ["Entendido. Guardaré en mi memoria todos los servicios adicionales y respetaré la brevedad absoluta. NUNCA volveré a pedir el asesor si ya envié el link de derivación."]}
         ]
         
-    historial.append({"role": "user", "parts": [texto_entrante]})
+    texto_para_historial = texto_entrante if texto_entrante else "[El usuario envió una imagen para analizar]"
     
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         chat = model.start_chat(history=historial[:-1])
-        respuesta = chat.send_message(texto_entrante)
+        
+        # PROCESAMIENTO DE VISIÓN (Si mandó imagen)
+        if imagen_pil:
+            param_vision = "INSTRUCCIÓN DE VISIÓN (No le digas esto al cliente): Analiza esta imagen. Si el cliente te envía una foto de una madera con un corte, moldura o ensamble (por ejemplo, una unión tipo 'finger', 'dientes' o ensamble cónico como en la madera), debes identificar qué tipo de fresa o herramienta hace ese corte basándote en tu catálogo. Por ejemplo, si ves maderas unidas con múltiples dientes en forma de cuña o 'V' entrelazados, sugiere la Fresa para Ensamble Cónico. Si es otra herramienta, identifícala. Luego, sigue las reglas de indagación habituales para ese tipo de herramienta."
+            contenido = [param_vision, imagen_pil]
+            if texto_entrante:
+                contenido.append(texto_entrante)
+            respuesta = chat.send_message(contenido)
+        else:
+            respuesta = chat.send_message(texto_entrante)
         
         texto_respuesta = respuesta.text
         texto_limpio = texto_respuesta
@@ -539,6 +565,8 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
             link_extraido = match.group(1)
             texto_limpio = texto_respuesta.replace(link_extraido, "").strip()
             texto_limpio = texto_limpio.replace("👉", "").replace("Hacé clic en este enlace para hablar con él", "").strip()
+        
+        historial.append({"role": "user", "parts": [texto_para_historial]})
         
         if link_extraido or "Te voy a derivar con" in texto_respuesta:
             vendedor_asignado = "Orgánico / Asignado por IA" if tanda_id_actual == "ORGANICO" else "Vendedor de Campaña"
@@ -579,7 +607,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (Envíos y Afilados) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (Versión Visión + Anti-Códigos) 🚀", 200
 
 @app.route('/wa/<tanda_id>/<telefono_cliente>/<vendedor>', methods=['GET'])
 def redirect_whatsapp(tanda_id, telefono_cliente, vendedor):
@@ -680,13 +708,28 @@ def recibir_notificaciones():
             
             if 'messages' in cambios:
                 mensaje = cambios['messages'][0]
+                
+                # REVISAR SI EL MENSAJE ES TEXTO O IMAGEN
                 if mensaje['type'] == 'text': 
                     telefono_cliente = limpiar_numero(mensaje['from'])
                     texto_cliente = mensaje['text']['body']
-                    
                     print(f"📩 MENSAJE de {telefono_cliente}: {texto_cliente}", flush=True)
                     registrar_metrica('responded', telefono_cliente) 
                     procesar_mensaje_con_gemini(telefono_cliente, texto_cliente)
+                
+                elif mensaje['type'] == 'image':
+                    telefono_cliente = limpiar_numero(mensaje['from'])
+                    media_id = mensaje['image']['id']
+                    texto_cliente = mensaje['image'].get('caption', '') # Obtiene el texto si mandó la foto con un comentario
+                    
+                    print(f"📸 IMAGEN de {telefono_cliente} - Descargando para análisis...", flush=True)
+                    registrar_metrica('responded', telefono_cliente)
+                    
+                    imagen_pil = descargar_imagen_whatsapp(media_id)
+                    if imagen_pil:
+                        procesar_mensaje_con_gemini(telefono_cliente, texto_cliente, imagen_pil=imagen_pil)
+                    else:
+                        procesar_mensaje_con_gemini(telefono_cliente, "Te envié una imagen pero hubo un error al cargarla. " + texto_cliente)
                 
             elif 'statuses' in cambios:
                 estado = cambios['statuses'][0]['status'] 

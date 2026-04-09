@@ -5,3 +5,4 @@ gspread
 APScheduler
 google-generativeai
 psycopg2-binary
+Pillow
