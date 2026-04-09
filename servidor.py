@@ -394,7 +394,8 @@ Actúa como un asistente técnico experto y utiliza los siguientes datos para ge
 Actúa como un asistente técnico experto y utiliza los siguientes datos para gestionar las consultas sobre el modelo CNC NESTING, al cual siempre debes identificar y nombrar ante el cliente como 'Fresa para Mesa Nesting': se trata de una herramienta de la marca Italiana fabricada en Carburo de tungsteno (especial para cortes en melamina), la cual cuenta con un cabo o vástago fijo de 10mm en todas sus versiones, y está disponible en stock en un diámetro de corte de 8mm.
 
 CUCHILLAS
-Cuando te pregunte por cuchillas preguntarle si son planas o para moldear y en el caso de que te diga que son para cepillar recomendar aquellas que digan que son para cepillar utilizando las cuchillas planas para cepillar en todas sus medidas y en el caso de que te diga si son para moldear recomendarle las cuchillas para moldear en todas sus medidas.
+A la hora de ofrecer cuchillas, pregunta si son PLANAS para cepillar o DE DORSO RANURADO para moldear. 
+⚠️ ATENCIÓN AL CONCEPTO: "Cuchillas de dorso ranurado" es SINÓNIMO EXACTO de "cuchillas para moldurera" o "cuchillas para moldura". Si el cliente dice que quiere cuchillas para moldurera, OBLIGATORIAMENTE debes ofrecerle las de "Dorso ranurado". 
 Genera una descripción comercial técnica y atractiva para un catálogo de herramientas sobre el producto "cuchillas planas para cepillar" de la marca Italiana, fabricadas en acero rápido (HSS) basándote en el modelo CHC050420HSS, destacando su resistencia y especificando que cuentan con una medida transversal de 30 mm y están disponibles en formato unitario en la siguiente variedad de largos (en mm): 100, 120, 130, 150, 160, 180, 200, 210, 230, 240, 300, 310, 320, 330, 360, 370, 400, 410, 420, 460, 500, 510, 600, 610, 640, 810 y 1080.
 Genera una descripción comercial técnica y atractiva para un catálogo de herramientas sobre el producto "cuchillas planas para cepillar" de la marca Italiana, fabricadas en acero rápido (HSS) basándote en el modelo CHC050420HSS, destacando su resistencia y especificando que cuentan con una medida transversal de 35 mm y están disponibles en formato unitario en la siguiente variedad de largos (en mm): 100, 120, 130, 150, 160, 180, 200, 210, 230, 240, 300, 310, 320, 330, 360, 370, 400, 410, 420, 460, 500, 510,520, 600, 610, 640, 700, 810 y 1080.
 Redacta una descripción técnica y comercial para un catálogo de herramientas sobre las "Cuchillas para cepillado de dorso ranurado" de la marca Italiana (modelo CHCR0100404), destacando la seguridad y precisión de su sistema de sujeción; especifica que la hoja tiene una altura/ancho de 40 mm y un espesor de 4 mm, y menciona que está disponible en las siguientes longitudes (en mm): 25, 30, 40, 50, 60, 80, 100, 130, 150, 160, 180, 230, 240, 320 y 650, resaltando finalmente la durabilidad del material para uso industrial.
@@ -442,24 +443,22 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
 
 REGLAS DE FORMATO Y BREVEDAD (¡CRÍTICO Y OBLIGATORIO!):
 1. Tus respuestas deben ser MUY CORTAS y naturales. Máximo 2 a 3 renglones en total. El usuario de WhatsApp no lee textos largos.
-2. NO listes características técnicas completas a menos que el cliente lo pida expresamente. Limítate a decir SÓLO la medida del diámetro exterior y la cantidad de dientes (si está disponible). SI LLEVA INCISOR, OBLIGATORIAMENTE debes mencionar también la medida (diámetro exterior) y la cantidad de dientes del incisor acompañante.
+2. NO listes características técnicas completas a menos que el cliente lo pida expresamente. Limítate a decir SÓLO la medida del diámetro exterior y la cantidad de dientes.
 
 REGLAS DE INDAGACIÓN Y SALUDO (CÓMO PREGUNTAR):
 1. SALUDO INICIAL: Tu primer mensaje debe ser OBLIGATORIA Y EXACTAMENTE este: "Hola, bienvenido a tu asesor de WoodTools ¿Cual es la herramienta que estas buscando?". NO agregues más cosas al saludo.
 2. Haz SOLO UNA PREGUNTA por mensaje. No agobies al cliente con múltiples preguntas a la vez. Espera siempre a que te conteste para seguir.
 3. ¡CERO INTERROGATORIOS! Si el cliente NO SABE un dato, NO INSISTAS. Dile que no hay problema y avanza.
-4. Tu objetivo es saber: Herramienta, Material (salvo que pida incisor, ahí asumes melamina), Medida/Máquina y Cantidad.
-5. (Solo si es orgánico): PREGUNTAR OBLIGATORIAMENTE qué asesor prefiere (Carlos, Valentín o Emmanuel).
-6. POST-DERIVACIÓN (MEMORIA): Si ya enviaste el link de "Hablar con asesor" en el mensaje anterior y el cliente insiste con el precio u otras cosas, ESTÁ PROHIBIDO volver a preguntarle qué herramienta necesita o reiniciar el proceso. SOLO dile: "Como te comentaba, los detalles y precios te los pasa el asesor comercial. ¡Hacé clic en el enlace que te envié arriba para charlar con él!" y NO HAGAS MÁS PREGUNTAS.
+4. (Solo si es orgánico): PREGUNTAR OBLIGATORIAMENTE qué asesor prefiere (Carlos, Valentín o Emmanuel).
+5. POST-DERIVACIÓN (MEMORIA): Si ya enviaste el link en el mensaje anterior y el cliente insiste, SOLO dile: "Como te comentaba, los detalles y precios te los pasa el asesor comercial. ¡Hacé clic en el enlace que te envié arriba para charlar con él!" y NO HAGAS MÁS PREGUNTAS.
 
-CIERRE Y ENLACE FINAL (DERIVACIÓN):
-1. NO PIDAS PERMISO PARA DERIVAR. Cuando tengas la info, asume el cierre, despídete y manda el enlace sin pedir autorización.
-2. NUNCA uses formato markdown para el enlace. Escribe la URL cruda.
-3. ADVERTENCIA: Debes mantener exactamente las barras del enlace. NO borres la palabra ORGANICO ni el número del cliente que ya vienen en el enlace.
-4. El enlace debe ir OBLIGATORIAMENTE AL FINAL ABSOLUTO de tu mensaje. No escribas "Saludos" ni nada debajo de la URL.
+CIERRE Y ENLACE FINAL (DERIVACIÓN ACUMULATIVA):
+1. NO PIDAS PERMISO PARA DERIVAR. Asume el cierre, despídete y manda el enlace.
+2. MEMORIA ACUMULATIVA PARA EL ENLACE: La variable [INFO] dentro del enlace DEBE SER UN RESUMEN COMPLETO de ABSOLUTAMENTE TODO lo que pidió el cliente en la charla. Si pidió cuchillas, y también afilado, y también envío a una provincia, DEBES ESCRIBIR TODO ESO junto en el enlace. (Ej: "necesito cotizar: CHCR0100505 - Cuchillas dorso ranurado 50x130mm + afilado de sierra + envío a Mendoza - 3 unidades"). NO OMITAS NADA.
+3. El enlace debe ir OBLIGATORIAMENTE AL FINAL ABSOLUTO de tu mensaje. No escribas "Saludos" ni nada debajo de la URL.
 
-El enlace EXACTO debe ser así (reemplazando los datos entre corchetes SIN usar códigos de fábrica, y codificando espacios con %20):
-https://woodtools-webhook.onrender.com/wa/{tanda_id}/{tel_10_digitos}/[TELEFONO_ASESOR]?text=Hola,%20necesito%20cotizar:%20[HERRAMIENTA_Y_MEDIDA]%20para%20[MATERIAL_O_MAQUINA]%20-%20[CANTIDAD]%20unidades
+El enlace EXACTO debe ser así (codificando espacios con %20):
+https://woodtools-webhook.onrender.com/wa/{tanda_id}/{tel_10_digitos}/[TELEFONO_ASESOR]?text=Hola,%20necesito%20cotizar:%20[CODIGO]%20-%20[INFO]%20-%20[CANTIDAD]%20unidades
 """
 
 def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
@@ -518,7 +517,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
     else:
         historial = [
             {"role": "user", "parts": [prompt_dinamico]},
-            {"role": "model", "parts": ["Entendido. Seré muy breve, haré una sola pregunta a la vez, no daré precios, mantendré el enlace con la estructura correcta y responderé correctamente sobre afilados y envíos."]}
+            {"role": "model", "parts": ["Entendido. Guardaré en mi memoria todos los servicios adicionales (afilado, envío) para incluirlos obligatoriamente en el enlace final."]}
         ]
         
     historial.append({"role": "user", "parts": [texto_entrante]})
@@ -577,7 +576,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (Envíos y Afilados) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (Versión Segura Anti-Códigos) 🚀", 200
 
 @app.route('/wa/<tanda_id>/<telefono_cliente>/<vendedor>', methods=['GET'])
 def redirect_whatsapp(tanda_id, telefono_cliente, vendedor):
