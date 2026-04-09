@@ -232,16 +232,18 @@ def revisar_rutinas_de_tiempo():
                     vendedor_asignado = res_vend[0] if res_vend else "Sin asignar"
                     campana = res_vend[1] if res_vend else "Contacto Orgánico"
                     
+                    historial = json.loads(historial_str)
+                    historial_limpio = historial[2:] if len(historial) >= 2 else historial
+                    
                     execute_db_query("""
                         INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
                         VALUES (%s, %s, %s, %s)
                         ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
-                    """, (telefono, vendedor_asignado, historial_str, datetime.now()), commit=True)
+                    """, (telefono, vendedor_asignado, json.dumps(historial_limpio), datetime.now()), commit=True)
 
-                    historial = json.loads(historial_str)
                     ultimo_msg_cliente = "Sin mensajes recientes."
-                    for msg in reversed(historial):
-                        if msg.get("role") == "user" and "CONTEXTO" not in msg.get("parts", [""])[0]:
+                    for msg in reversed(historial_limpio):
+                        if msg.get("role") == "user":
                             ultimo_msg_cliente = msg["parts"][0]
                             break
 
@@ -273,7 +275,7 @@ scheduler.add_job(func=revisar_rutinas_de_tiempo, trigger="interval", minutes=5)
 scheduler.start()
 
 # ==========================================
-# CEREBRO IA: LÓGICA CONDICIONAL Y ORGÁNICA
+# CEREBRO IA: LÓGICA CONDICIONAL Y ORGÁNICA (EXPERTO TÉCNICO)
 # ==========================================
 BASE_CONOCIMIENTO = """
 Eres un asesor profesional sobre la carpintería, te destacas por dar consejos para que las personas compren las herramientas de mejor calidad ofreciendo opciones tanto de gran calidad pero alto precio pero también un precio más económico pero menor calidad (obviamente aclarando siempre que es calidad profesional las herramientas).
@@ -320,7 +322,7 @@ Actúa como un asistente técnico especializado. Al brindar información sobre e
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LG2A 2800, cuenta con un diámetro exterior de 350 mm, un ancho de corte (espesor) de 3,5 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Maciza, Madera, Madera contrachapada, aglomerado sin procesar, blanda y dura.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2A 1600, cuenta con un diámetro exterior de 250 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera, blanda y dura en general, a favor de la veta.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2A 2500, cuenta con un diámetro exterior de 350 mm, un ancho de corte (espesor) de 3,5 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera, blanda y dura (a favor y en contra de la veta).
-Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2B 0700, cuenta con un diámetro exterior de 250 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera (modelo para madera blanda y dura en general).
+Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo always como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2B 0700, cuenta con un diámetro exterior de 250 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera (modelo para madera blanda y dura en general).
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Franzoi, modelo SC4504248F, cuenta con un diámetro exterior de 450 mm, un ancho de corte (espesor) de 4,2 mm y un diámetro central de 30 mm; está fabricado en Metal duro y su uso es apto específicamente para superficies de Madera.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2C 2000, cuenta con un diámetro exterior de 350 mm, un ancho de corte (espesor) de 3,5 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Franzoi, modelo SC60055244F, cuenta con un diámetro exterior de 600 mm, un ancho de corte (espesor) de 5,5 mm y un diámetro central de 30 mm; está fabricado en Metal duro y su uso es apto specifically para superficies de Madera (modelo para máquinas múltiples).
@@ -441,11 +443,13 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
         tel_10 = extraer_10_digitos(telefono_cliente)
         res_hist = execute_db_query("SELECT historial FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), fetchone=True)
         if res_hist:
+            historial_obj = json.loads(res_hist[0])
+            historial_limpio = historial_obj[2:] if len(historial_obj) >= 2 else historial_obj
             execute_db_query("""
                 INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
                 VALUES (%s, %s, %s, %s)
                 ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
-            """, (telefono_cliente, "Cerrado por Reset", res_hist[0], datetime.now()), commit=True)
+            """, (telefono_cliente, "Cerrado por Reset", json.dumps(historial_limpio), datetime.now()), commit=True)
             
         execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), commit=True)
         execute_db_query("DELETE FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), commit=True)
@@ -461,11 +465,15 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
         if ultima_interaccion and datetime.now() - ultima_interaccion > timedelta(hours=1):
             res_vend = execute_db_query("SELECT numero_vendedor FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), fetchone=True)
             vendedor_asignado = res_vend[0] if res_vend else "Sin asignar"
+            
+            historial_obj = json.loads(historial_str)
+            historial_limpio = historial_obj[2:] if len(historial_obj) >= 2 else historial_obj
+            
             execute_db_query("""
                 INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
                 VALUES (%s, %s, %s, %s)
                 ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
-            """, (telefono_cliente, vendedor_asignado, historial_str, datetime.now()), commit=True)
+            """, (telefono_cliente, vendedor_asignado, json.dumps(historial_limpio), datetime.now()), commit=True)
             
             execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), commit=True)
             execute_db_query("DELETE FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), commit=True)
@@ -510,12 +518,13 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante):
             vendedor_asignado = "Orgánico / Asignado por IA" if tanda_id_actual == "ORGANICO" else "Vendedor de Campaña"
             
             historial.append({"role": "model", "parts": [texto_respuesta]})
+            historial_limpio = historial[2:] if len(historial) >= 2 else historial
             
             execute_db_query("""
                 INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
                 VALUES (%s, %s, %s, %s)
                 ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
-            """, (telefono_cliente, vendedor_asignado, json.dumps(historial), datetime.now()), commit=True)
+            """, (telefono_cliente, vendedor_asignado, json.dumps(historial_limpio), datetime.now()), commit=True)
             
             execute_db_query("""
                 INSERT INTO chat_sesiones (telefono, historial, ultima_interaccion, advertido) 
