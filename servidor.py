@@ -548,7 +548,37 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
         
         # PROCESAMIENTO DE VISIÓN (Si mandó imagen)
         if imagen_pil:
-            param_vision = "INSTRUCCIÓN VISUAL CRÍTICA (No se lo digas al cliente): Analiza esta foto. OBLIGATORIO distinguir entre estos dos ensambles de madera: 1) Fresa para Ensamble Cónico HM: La madera unida muestra dientes GRANDES, GRUESOS, y con las PUNTAS TOTALMENTE CHATAS O PLANAS (como trapecios rectos). Son pocos dientes (ej: 3 o 4 canales grandes). 2) Fresa para Finger HM: La madera unida muestra MUCHOS dientes PEQUEÑOS, PUNTIAGUDOS y en forma de 'V' afilada (zig-zag perfecto sin puntas chatas). Identifica correctamente la fresa. Si la identificas, dile al cliente qué herramienta es y NO le vuelvas a preguntar por el perfil. Pregúntale SOLO lo que falta (ej: espesor, máquina o unidades)."
+            param_vision = """INSTRUCCIÓN VISUAL ESTRICTA Y EXPERTA (Oculta al cliente):
+Eres un experto analizando herramientas de carpintería. El cliente ha enviado una imagen. Debes analizar detenidamente la foto, identificar si es la HERRAMIENTA FÍSICA o un CORTE EN MADERA, y cruzar la geometría visual con el siguiente diccionario para identificar el producto exacto.
+
+PASO 1: ANÁLISIS GEOMÉTRICO (DICCIONARIO VISUAL)
+
+[A] ENSAMBLES Y UNIONES (Dientes múltiples):
+- Geometría: Dientes con PUNTAS PLANAS, CHATAS O RECTAS (forma de trapecio ancho). -> "Fresa para Ensamble Cónico HM".
+- Geometría: Dientes con PUNTAS AFILADAS EN 'V' (zig-zag perfecto y puntiagudo). -> "Fresa para Finger HM".
+
+[B] RANURAS, CANALES Y CEPILLADO (Cortes rectos):
+- Geometría: Canal cuadrado/rectangular simple. Herramienta con 4 a 6 placas rectas. -> "Fresas Rectas HM" (o "Fresas Rectas con Incisores" si se ven puntas extra para no astillar).
+- Geometría: Canal cuadrado pero la herramienta se compone de discos intercalados/acoplados ajustables. -> "Fresas para Ranurar Regulables HM".
+- Geometría: Rebaje o cepillado muy ancho y plano. Herramienta cilíndrica ancha tipo rodillo con muchas placas apiladas. -> "Cabezales Cepilladores HM".
+
+[C] ÁNGULOS Y CURVAS SIMPLES (Redondeos y biseles):
+- Geometría: Corte diagonal recto (bisel o chanfle). Herramienta con placas inclinadas. -> "Fresas en ángulo HM".
+- Geometría: Una sola curva suave que mata/redondea una arista (cuarto de curva). -> "Fresas 1/4 círculo cóncavo y convexo HM".
+- Geometría: Curva completa de lado a lado (forma de 'U' o mediacaña). -> "Fresas 1/2 círculo cóncavo y convexo HM".
+
+[D] MOLDURAS COMPLEJAS Y ARQUITECTÓNICAS:
+- Geometría: Perfil escalonado decorativo, con curvas suaves y rectas combinadas (típico de marcos de puertas o base de pared). -> "Zócalo Simple y Contramarco HM".
+- Geometría: Curva interior profunda (rincón cóncavo simple). -> "Rinconera Simple HM".
+- Geometría: Dos curvas cóncavas iguales separadas por un pequeño tajo o ranura recta en el medio. Herramienta que incluye una pequeña sierra circular en el centro. -> "Rinconera Doble HM".
+
+PASO 2: ACCIÓN OBLIGATORIA DE RESPUESTA
+1. Identifica la herramienta usando las reglas de arriba.
+2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto (Ej: "¡Claro! Por el perfil que me mostrás en la foto, lo que necesitas es una [Nombre de la Fresa]").
+3. NUNCA menciones códigos internos en el texto.
+4. NUNCA le preguntes qué perfil busca (¡ya lo viste en la foto!).
+5. Continúa tu embudo preguntando SOLO los datos que te falten para cotizar: Espesor de la madera (si aplica), Máquina que utiliza (tupí, moldurera, etc.) o Cantidad de unidades.
+"""
             contenido = [param_vision, imagen_pil]
             if texto_entrante:
                 contenido.append(texto_entrante)
