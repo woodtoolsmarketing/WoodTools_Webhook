@@ -135,18 +135,27 @@ init_db()
 
 def obtener_catalogo_desde_db():
     """Consulta la tabla catalogo_ia en Neon y formatea el texto para Gemini"""
+    print("🔍 Intentando leer el catálogo desde Neon...", flush=True)
     try:
         filas = execute_db_query("SELECT familia, nombre_comercial, rasgos_visuales FROM catalogo_ia", fetchall=True)
-        if not filas:
+        
+        if filas is None:
+            print("❌ ERROR: La consulta devolvió None. O no hay pool de conexión, o falló el SQL.", flush=True)
+            return ""
+            
+        if len(filas) == 0:
+            print("⚠️ ATENCIÓN: La conexión funciona, pero la tabla 'catalogo_ia' está VACÍA.", flush=True)
             return ""
 
+        print(f"✅ ¡ÉXITO! Se leyeron {len(filas)} herramientas de la base de datos.", flush=True)
+        
         texto_catalogo = "DICCIONARIO VISUAL Y TÉCNICO DE HERRAMIENTAS (Extraído de Base de Datos):\n"
         for familia, nombre, rasgos in filas:
             texto_catalogo += f"[{familia}] - {nombre}:\n{rasgos}\n\n"
         
         return texto_catalogo
     except Exception as e:
-        print(f"Error consultando el catálogo en DB: {e}")
+        print(f"❌ Error grave consultando el catálogo en DB: {e}", flush=True)
         return ""
 
 def limpiar_numero(num):
