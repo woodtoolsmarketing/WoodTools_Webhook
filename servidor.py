@@ -637,10 +637,22 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
         # PROCESAMIENTO DE VISIÓN (Si mandó imagen)
         if imagen_pil:
             param_vision = """INSTRUCCIÓN VISUAL ESTRICTA Y EXPERTA (Oculta al cliente):
-Eres un experto analizando herramientas de carpintería. El cliente ha enviado una imagen. Debes analizar detenidamente la foto, identificar si es la HERRAMIENTA FÍSICA o un CORTE EN MADERA, y cruzar la geometría visual con el DICCIONARIO VISUAL Y TÉCNICO DE HERRAMIENTAS que tienes en tu base de conocimiento para identificar el producto exacto.
+Eres un experto analizando herramientas de carpintería. El cliente ha enviado una imagen. Debes analizar detenidamente la foto (si es la herramienta física o un corte en madera) y usar este PROTOCOLO DE DESEMPATE VISUAL estricto para no confundir perfiles similares:
+
+REGLA DE DESEMPATE 1: MOLDURAS VS ZÓCALOS VS ABERTURAS (¡EL ERROR MÁS COMÚN!)
+Si ves una madera con un perfil decorativo curvo (tipo pecho paloma o lomas):
+- ¿Tiene una RANURA PROFUNDA y estrecha en el medio del canto (para un vidrio/tablero)? -> Es "Moldura de Puertas y Ventanas" o "Moldura Simple". ¡NO es Zócalo!
+- ¿Tiene una ESPIGA / MACHO RECTO que sobresale en el medio del canto? -> Es "Contramoldura". ¡NO es Zócalo!
+- ¿Es un rebaje muy ANCHO y extenso sobre la CARA PLANA de la madera, afinando el borde para encastrar? -> Es "Replán de Tablero" o la función replán de la "Moldura Simple". ¡NO es Zócalo!
+- ¿Es una caída recta en diagonal a 45° que luego termina en una curvita? -> Es "Frente Inglés".
+- ¿Es un relieve ondulado continuo en un borde, SIN ranuras al medio, SIN espigas al medio, que se usa contra la pared o piso? -> SOLO ENTONCES es "Zócalo Simple y Contramarco HM".
+
+REGLA DE DESEMPATE 2: ENSAMBLES FINGER VS CÓNICO
+- Dientes puntiagudos en forma de "V" afilada (zig-zag puro) -> "Fresa para Finger HM".
+- Dientes con puntas CHATAS, PLANAS o CUADRADAS (trapecios) -> "Fresa para Ensamble Cónico HM".
 
 PASO 1: ACCIÓN OBLIGATORIA DE RESPUESTA
-1. Identifica la herramienta cruzando los rasgos de la foto con el diccionario de tu base de datos.
+1. Identifica la herramienta usando las REGLAS DE DESEMPATE.
 2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto (Ej: "¡Claro! Por el perfil que me mostrás en la foto, lo que necesitas es una [Nombre de la Fresa]").
 3. NUNCA menciones códigos internos en el texto.
 4. NUNCA le preguntes qué perfil busca (¡ya lo viste en la foto!).
