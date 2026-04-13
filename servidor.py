@@ -132,6 +132,23 @@ init_db()
 # ==========================================
 # FUNCIONES BÁSICAS Y DE ENVÍO
 # ==========================================
+
+def obtener_catalogo_desde_db():
+    """Consulta la tabla catalogo_ia en Neon y formatea el texto para Gemini"""
+    try:
+        filas = execute_db_query("SELECT familia, nombre_comercial, rasgos_visuales FROM catalogo_ia", fetchall=True)
+        if not filas:
+            return ""
+
+        texto_catalogo = "DICCIONARIO VISUAL Y TÉCNICO DE HERRAMIENTAS (Extraído de Base de Datos):\n"
+        for familia, nombre, rasgos in filas:
+            texto_catalogo += f"[{familia}] - {nombre}:\n{rasgos}\n\n"
+        
+        return texto_catalogo
+    except Exception as e:
+        print(f"Error consultando el catálogo en DB: {e}")
+        return ""
+
 def limpiar_numero(num):
     return ''.join(filter(str.isdigit, str(num)))
 
@@ -450,8 +467,12 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
         tel_vend = "[Tel_Elegido]"
         texto_contexto = """CONTEXTO: Cliente "Orgánico". Si es el primer mensaje o AÚN no sabes con qué asesor quiere hablar, pregunta si prefiere a Carlos, Valentín o Emmanuel. ¡ATENCIÓN!: Si revisas el historial y el cliente ya eligió a uno o dijo que "le da igual", "cualquiera" o "no sé", TIENES ESTRICTAMENTE PROHIBIDO volver a preguntarlo. Si le da igual, asume uno en silencio."""
 
+    catalogo_ia_dinamico = obtener_catalogo_desde_db()
+
     return f"""
 {BASE_CONOCIMIENTO}
+
+{catalogo_ia_dinamico}
 
 {texto_contexto}
 
@@ -549,31 +570,10 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
         # PROCESAMIENTO DE VISIÓN (Si mandó imagen)
         if imagen_pil:
             param_vision = """INSTRUCCIÓN VISUAL ESTRICTA Y EXPERTA (Oculta al cliente):
-Eres un experto analizando herramientas de carpintería. El cliente ha enviado una imagen. Debes analizar detenidamente la foto, identificar si es la HERRAMIENTA FÍSICA o un CORTE EN MADERA, y cruzar la geometría visual con el siguiente diccionario para identificar el producto exacto.
+Eres un experto analizando herramientas de carpintería. El cliente ha enviado una imagen. Debes analizar detenidamente la foto, identificar si es la HERRAMIENTA FÍSICA o un CORTE EN MADERA, y cruzar la geometría visual con el DICCIONARIO VISUAL Y TÉCNICO DE HERRAMIENTAS que tienes en tu base de conocimiento para identificar el producto exacto.
 
-PASO 1: ANÁLISIS GEOMÉTRICO (DICCIONARIO VISUAL)
-
-[A] ENSAMBLES Y UNIONES (Dientes múltiples):
-- Geometría: Dientes con PUNTAS PLANAS, CHATAS O RECTAS (forma de trapecio ancho). -> "Fresa para Ensamble Cónico HM".
-- Geometría: Dientes con PUNTAS AFILADAS EN 'V' (zig-zag perfecto y puntiagudo). -> "Fresa para Finger HM".
-
-[B] RANURAS, CANALES Y CEPILLADO (Cortes rectos):
-- Geometría: Canal cuadrado/rectangular simple. Herramienta con 4 a 6 placas rectas. -> "Fresas Rectas HM" (o "Fresas Rectas con Incisores" si se ven puntas extra para no astillar).
-- Geometría: Canal cuadrado pero la herramienta se compone de discos intercalados/acoplados ajustables. -> "Fresas para Ranurar Regulables HM".
-- Geometría: Rebaje o cepillado muy ancho y plano. Herramienta cilíndrica ancha tipo rodillo con muchas placas apiladas. -> "Cabezales Cepilladores HM".
-
-[C] ÁNGULOS Y CURVAS SIMPLES (Redondeos y biseles):
-- Geometría: Corte diagonal recto (bisel o chanfle). Herramienta con placas inclinadas. -> "Fresas en ángulo HM".
-- Geometría: Una sola curva suave que mata/redondea una arista (cuarto de curva). -> "Fresas 1/4 círculo cóncavo y convexo HM".
-- Geometría: Curva completa de lado a lado (forma de 'U' o mediacaña). -> "Fresas 1/2 círculo cóncavo y convexo HM".
-
-[D] MOLDURAS COMPLEJAS Y ARQUITECTÓNICAS:
-- Geometría: Perfil escalonado decorativo, con curvas suaves y rectas combinadas (típico de marcos de puertas o base de pared). -> "Zócalo Simple y Contramarco HM".
-- Geometría: Curva interior profunda (rincón cóncavo simple). -> "Rinconera Simple HM".
-- Geometría: Dos curvas cóncavas iguales separadas por un pequeño tajo o ranura recta en el medio. Herramienta que incluye una pequeña sierra circular en el centro. -> "Rinconera Doble HM".
-
-PASO 2: ACCIÓN OBLIGATORIA DE RESPUESTA
-1. Identifica la herramienta usando las reglas de arriba.
+PASO 1: ACCIÓN OBLIGATORIA DE RESPUESTA
+1. Identifica la herramienta cruzando los rasgos de la foto con el diccionario de tu base de datos.
 2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto (Ej: "¡Claro! Por el perfil que me mostrás en la foto, lo que necesitas es una [Nombre de la Fresa]").
 3. NUNCA menciones códigos internos en el texto.
 4. NUNCA le preguntes qué perfil busca (¡ya lo viste en la foto!).
