@@ -129,92 +129,9 @@ def init_db():
 
 init_db()
 
-def init_catalogo_ia():
-    try:
-        execute_db_query('''
-            CREATE TABLE IF NOT EXISTS catalogo_ia (
-                id SERIAL PRIMARY KEY,
-                familia TEXT,
-                nombre_comercial TEXT,
-                rasgos_visuales TEXT
-            )
-        ''', commit=True)
-
-        res = execute_db_query("SELECT COUNT(*) FROM catalogo_ia", fetchone=True)
-        if res and res[0] == 0:
-            print("⚙️ Inyectando base de datos del Catálogo IA en Neon...", flush=True)
-            
-            # EL SQL DEFINITIVO CON DESCRIPCIONES 100% BASADAS EN EL MANUAL TÉCNICO
-            query_insert = """
-            INSERT INTO catalogo_ia (familia, nombre_comercial, rasgos_visuales) VALUES 
-            ('Ranuras', 'Fresas Rectas HM', 'Cuerpo cilíndrico rojo. 4 a 6 insertos de HM rectangulares plateados soldados perpendiculares al eje. Esquinas de los insertos limpias a 90° sin elementos adicionales. Firma visual del corte: Ranura rectangular simple y limpia con paredes rectas y fondo plano.'),
-            ('Ranuras', 'Fresas Rectas con Incisores HM', 'Cuerpo cilíndrico rojo. 4 a 6 cortantes rectos acompañados por pequeñas puntas extra sobresalientes en los extremos (incisores). Firma visual del corte: Canal rectangular idéntico a las rectas, pero los incisores garantizan ausencia total de astillado en los bordes superiores de la madera.'),
-            ('Ranuras', 'Fresas para Ranurar Regulables HM', 'Herramienta compuesta por discos rojos apilados o segmentados con insertos rectangulares y 4 dientes incisores. Firma visual del corte: Ranura rectangular, rebaje o espiga en la madera cuyo ancho interior varía según la cantidad de discos o separación configurada.'),
-            ('Cepillado', 'Cabezales Cepilladores HM', 'Cuerpo ancho tipo rodillo macizo. Posee una gran cantidad de pequeñas placas de HM (40 a 100 dientes) dispuestas en espiral o escalonadas alrededor del cilindro. Firma visual del corte: Rebaje ancho, extenso, liso y totalmente plano, ideal para cepillar caras anchas.'),
-            ('Ángulos', 'Fresas en ángulo HM', 'Cuerpo rojo con 4 o 6 insertos de HM cuyas caras son marcadamente rectas pero inclinadas en diagonal (fuera del eje ortogonal). Firma visual del corte: Deja un plano inclinado, bisel o chanfle (ángulo alfa) limpio y recto en la arista de la tabla de madera.'),
-            ('Curvas', 'Fresas 1/4 círculo cóncavo y convexo HM', 'Cuerpo rojo. La arista de corte tiene una única y simple curva de 90 grados (cuarto de círculo). Firma visual del corte: Mata o redondea una arista ortogonal creando una única curva convexa o cóncava que conecta dos planos rectos.'),
-            ('Curvas', 'Fresas 1/2 círculo cóncavo y convexo HM', 'Cuerpo rojo. Arista de corte con un perfil curvo completo y simétrico de 180° en forma de "U" profunda (cóncava) o panza saliente (convexa). Firma visual del corte: Redondea completamente un canto (boleado en C) o talla una canaleta de media caña perfecta.'),
-            ('Molduras', 'Zócalo Simple y Contramarco HM', 'Juego de fresas (tipo A y B). Filo complejo en forma de ola estirada: curva convexa prominente que desciende suavemente en un valle cóncavo profundo. Firma visual del corte: Talla el clásico perfil ondulado arquitectónico en la cara frontal (pecho paloma estirado) y, típicamente con el modelo B, hace un canal rectangular de alivio en la cara oculta.'),
-            ('Molduras', 'Rinconera Simple HM', 'Cuerpo rojo macizo. Geometría clave: un abultamiento central convexo (media esfera proyectada hacia afuera) flanqueado por cortes rectos horizontales (talones) en los bordes inferior y superior. Firma visual del corte: Elimina la arista de 90° y excava un canal interior perfectamente cóncavo y ancho, dejando escalones rectos a cada lado.'),
-            ('Molduras', 'Rinconera Doble HM', 'Herramienta "sándwich". Dos cuerpos rojos con filos curvos salientes que intercalan una fina y plana hoja de sierra circular en el medio. Firma visual del corte: Talla DOS huecos cóncavos (canales) paralelos, estrictamente divididos en el centro por una hendidura o tajo recto (marca de la hoja de sierra central).'),
-            ('Molduras', 'Frente Inglés HM', 'Juego de fresas regulables rojas (tipos A y B). El filo desciende en una línea diagonal recta a 45° (bisel) que empalma limpiamente con una curva cóncava suave en la base, contando además con dientes rectos horizontales laterales. Firma visual del corte: La cara vista de la madera tiene caída diagonal y terminación curva, mientras que en el canto oculto genera una ranura (modelo B) o una espiga machimbrada (modelo A).'),
-            ('Ensambles', 'Machimbre Simple HM', 'Juego apilable rojo. Filos exteriores rectos con un ligero escalón en su diseño, combinados con un disco de sierra delgado de 16 dientes para el centro. Firma visual del corte: Crea lengüeta recta o canal hembra recto. Al unir dos tablas, la cara vista presenta la clásica junta hundida rectangular o un bisel simple en V.'),
-            ('Ensambles', 'Machimbre Doble HM', 'Juego apilable rojo de alta densidad. Se diferencia visualmente del simple por utilizar DOS discos finos de sierra centrales paralelos para la pieza hembra, o un perfil central esculpido en doble espiga para el macho. Firma visual del corte: Talla estrictamente dos lengüetas (machos) o dos ranuras (hembras) gemelas y paralelas en el canto de la madera.'),
-            ('Ensambles', 'Machimbre Piso Standard', 'Juego de 4 fresas apilables rojas. La zona de encastre interno presenta cortantes marcadamente redondeados y curvos en lugar de esquinas afiladas a 90°. Firma visual del corte: Macho de lengüeta redondeada y hembra cóncava tipo U. Al encastrar, la cara superficial deja un canal recto y estrecho de separación denominado "junta abierta".'),
-            ('Ensambles', 'Machimbre Piso para Grampa HM', 'Juego de 4 fresas apilables rojas. Mantiene el encastre curvo del standard, pero incorpora un pequeño cortante saliente rectangular adicional. Firma visual del corte: Mismo perfil de junta abierta y macho redondeado, pero se observa claramente una pequeña ranura rectangular o muesca tallada en el labio inferior del canto (para alojamiento de grampa metálica oculta).'),
-            ('Ensambles', 'Machimbre Piso para Grampa y Microbisel HM', 'Mega-juego de 8 fresas apilables. Mantiene encastre curvo y muesca inferior de grampa, pero suma finísimos cortantes a 45° en la zona superior. Firma visual del corte: Perfil 3-en-1: Lengüeta interna redondeada + Muesca inferior oculta para grampa + Pequeños biseles/chanfles suavizados (microbisel) en las aristas superiores de la junta abierta superficial.'),
-            ('Perfilado', 'Deck Standard HM', 'Juego de 2 fresas rojas. Las aristas de corte presentan curvas profundas en forma de "C" envolvente diseñadas puramente para matar bordes. Firma visual del corte: Redondea las aristas superior e inferior de una tabla creando el clásico listón liso de deck superior y lateral, sin tallar ranuras internas.'),
-            ('Perfilado', 'Deck para Grampa HM', 'Juego compuesto de 4 fresas rojas y 2 delgadas sierras metálicas centrales. Firma visual del corte: Igual que el deck standard (aristas redondeadas simultáneamente), pero incluye de forma notoria un corte o ranura profunda, delgada y recta tallada justo a lo largo de todo el espesor central de la tabla (alojamiento de grampas plásticas).'),
-            ('Paneles y Puertas', 'Replán de Tablero HM', 'Fresa maciza roja de inmenso diámetro (ej. 200mm). Insertos de HM visualmente desproporcionados hacia lo ancho, mostrando un largo plano horizontal suave o curvo que termina en un salto. Firma visual del corte: No opera en el canto, sino rebajando enormemente el contorno de la cara de una placa, dejando una falda plana o suave declive extensa conectada a una fina lengüeta exterior de encastre.'),
-            ('Aberturas', 'Moldura de Puertas y Ventanas HM', 'Juego compuesto por 2 masivas fresas rojas enfrentadas con una hoja de sierra intercalada en el centro geométrico. Muestran simetría de espejo perfecta. Firma visual del corte: Perfilado interno simétrico. Talla un borde decorativo (curvas u ondulaciones) en el frente y al dorso de la tabla simultáneamente, dejando una hendidura o canal recto en el centro mismo del espesor del marco (para alojar vidrio o panel).'),
-            ('Aberturas', 'Contramolduras de Puertas y Ventanas HM', 'Cuerpo masivo rojo. Perfil de corte inverso. El rasgo visual es un sobresaliente bloque plano y rectangular en el medio, rodeado lateralmente por excavaciones o perfiles caídos. Firma visual del corte: Espiga central recta e imponente tallada en el canto de la madera, pero los apoyos laterales (hombros de la espiga) no son planos, sino que tienen caídas curvas contrapuestas para asentar con exactitud en la moldura descrita anteriormente.'),
-            ('Aberturas', 'Moldura de Puertas y Ventanas Simple HM', '¡ATENCIÓN IA! HERRAMIENTA MODULAR (Sistema 3 en 1). Juego rojo compuesto por 1 fresa gruesa decorativa curva y 2 fresas ranuradoras finas apilables. Firma visual del corte: Dependiendo del ensamble de las partes (Operación 1, 2 o 3) en la espigadora, una misma pieza de madera puede mostrar: A) Moldura curva con ranura central profunda. B) Contramoldura con tenón/espiga (Macho sobresaliente). C) Replán de declive ancho en la cara vista.'),
-            ('Paneles y Puertas', 'Puerta de Muebles HM', '¡ATENCIÓN IA! HERRAMIENTA MODULAR (Sistema 3 en 1). Juego rojo compuesto por 1 fresa gruesa cóncava/escalonada y 1 fresa plana apilable. Firma visual del corte: Exactamente igual que el modelo Simple de aberturas, la disposición de los filos permite 3 operaciones separadas de carpintería: Genera un perfil decorativo con ranura (Moldura), o la espiga correspondiente (Contramoldura) o el afinamiento perimetral para el tablero interior (Replán).'),
-            ('Ensambles', 'Fresa para Finger HM', 'Cuerpo cilíndrico rojo macizo. Su perfil de filo es inconfundible y agresivo: múltiples dientes puntiagudos, asimétricos y afilados dispuestos en "V" estricta (patrón zig-zag afilado, peine punzante). Firma visual del corte: Ensamble finger-joint. Deja en las testas de la madera una serie estriada de picos y valles filosos y profundos que se entrelazan como nudillos.'),
-            ('Ensambles', 'Fresa para Finger HM (hasta 45mm)', 'Cuerpo rojo denso, alto y notorio (configuración 2+2). Mismo diseño dentado que el Finger base (puntas afiladas en "V"), pero su cara de corte es mucho más larga verticalmente, albergando una mayor cantidad de picos agudos continuos. Firma visual del corte: Patrón zig-zag entrelazado y profundo, pero que abarca tableros y maderas muy gruesas (travesaños de hasta 4,5 cm).'),
-            ('Ensambles', 'Fresa para Ensamble Cónico HM', 'Juego de fresas apilables metálicas o rojas. Rasgo clave que no debe confundirse con Finger: Sus dientes extendidos terminan en puntas marcadamente PLANAS O CHATAS, conformando trapecios, nunca filos puntiagudos. Firma visual del corte: Ensamble trapezoidal en peine. Deja una sucesión gruesa de picos y canales en la madera, pero los topes siempre presentan base plana formando rectángulos (alineados, escalonados o en declive).'),
-            ('Ensambles', 'Fresa para Encastre HM', 'Cuerpo rojo muy distintivo. El cortante cruza la geometría en un agresivo bisel recto a 45 grados, pero en medio de esta diagonal perfecta, sobresale un canal u obstáculo rectangular ortogonal. Firma visual del corte: Ensamble en inglete con traba a 45°. Deja un clásico corte oblicuo para armar marcos a escuadra (corte a 45°), pero la diagonal no es plana: esconde una espiga sólida o surco interno (diente) para impedir que la junta se deslice al pegar.'),
-            ('Curvas', 'Fresa para Radios Múltiples HM', 'Cuerpo rojo. Perfil escalonado y continuo de aspecto ondulante, conformado por la sucesión matemática de múltiples curvas cóncavas consecutivas crecientes (R4, R6, R8, R10). Firma visual del corte: Aunque la herramienta es ondulada entera, en la tabla de madera realiza exclusivamente el redondeo simple y liso (un solo arco, cuarto de círculo) de una única arista o canto en uso, según qué fracción del filo se empleó.'),
-            ('Molduras', 'Fresa Multimoldura', 'Cuerpo cilíndrico masivo rojo, llamativamente provisto de unicamente dos insertos (Z=2). Su filo HM dibuja una curva extremadamente extendida, un mapa topográfico continuo compuesto de picos, valles suaves, saltos planos y lomas. Firma visual del corte: Fresa arquitectónica matriz. Jamás marca su perfil íntegro en la madera; talla un segmento minúsculo a la vez. Mediante ajuste vertical en el tupí, produce incontables y distintas variedades de molduras finas y combinadas.');
-            """
-            execute_db_query(query_insert, commit=True)
-            print("✅ Catálogo IA inyectado correctamente en la base de datos.", flush=True)
-        else:
-            print("✅ Catálogo IA ya existía y contiene datos. (Saltando inyección)", flush=True)
-            
-    except Exception as e:
-        print(f"❌ Error crítico iniciando tabla catálogo IA: {e}", flush=True)
-
-init_catalogo_ia()
-
 # ==========================================
 # FUNCIONES BÁSICAS Y DE ENVÍO
 # ==========================================
-
-def obtener_catalogo_desde_db():
-    """Consulta la tabla catalogo_ia en Neon y formatea el texto para Gemini"""
-    print("🔍 Intentando leer el catálogo desde Neon...", flush=True)
-    try:
-        filas = execute_db_query("SELECT familia, nombre_comercial, rasgos_visuales FROM catalogo_ia", fetchall=True)
-        
-        if filas is None:
-            print("❌ ERROR: La consulta devolvió None. O no hay pool de conexión, o falló el SQL.", flush=True)
-            return ""
-            
-        if len(filas) == 0:
-            print("⚠️ ATENCIÓN: La conexión funciona, pero la tabla 'catalogo_ia' está VACÍA.", flush=True)
-            return ""
-
-        print(f"✅ ¡ÉXITO! Se leyeron {len(filas)} herramientas de la base de datos.", flush=True)
-        
-        texto_catalogo = "DICCIONARIO VISUAL Y TÉCNICO DE HERRAMIENTAS (Extraído de Base de Datos):\n"
-        for familia, nombre, rasgos in filas:
-            texto_catalogo += f"[{familia}] - {nombre}:\n{rasgos}\n\n"
-        
-        return texto_catalogo
-    except Exception as e:
-        print(f"❌ Error grave consultando el catálogo en DB: {e}", flush=True)
-        return ""
 
 def limpiar_numero(num):
     return ''.join(filter(str.isdigit, str(num)))
@@ -381,6 +298,98 @@ scheduler.start()
 # ==========================================
 # CEREBRO IA: LÓGICA CONDICIONAL Y ORGÁNICA (EXPERTO TÉCNICO)
 # ==========================================
+
+CATALOGO_IA_ESTATICO = """
+DICCIONARIO VISUAL Y TÉCNICO DE HERRAMIENTAS:
+
+[Ranuras] - Fresas Rectas HM:
+Cuerpo cilíndrico rojo. 4 a 6 insertos de HM rectangulares plateados soldados perpendiculares al eje. Esquinas de los insertos limpias a 90° sin elementos adicionales. Firma visual del corte: Ranura rectangular simple y limpia con paredes rectas y fondo plano.
+
+[Ranuras] - Fresas Rectas con Incisores HM:
+Cuerpo cilíndrico rojo. 4 a 6 cortantes rectos acompañados por pequeñas puntas extra sobresalientes en los extremos (incisores). Firma visual del corte: Canal rectangular idéntico a las rectas, pero los incisores garantizan ausencia total de astillado en los bordes superiores de la madera.
+
+[Ranuras] - Fresas para Ranurar Regulables HM:
+Herramienta compuesta por discos rojos apilados o segmentados con insertos rectangulares y 4 dientes incisores. Firma visual del corte: Ranura rectangular, rebaje o espiga en la madera cuyo ancho interior varía según la cantidad de discos o separación configurada.
+
+[Cepillado] - Cabezales Cepilladores HM:
+Cuerpo ancho tipo rodillo macizo. Posee una gran cantidad de pequeñas placas de HM (40 a 100 dientes) dispuestas en espiral o escalonadas alrededor del cilindro. Firma visual del corte: Rebaje ancho, extenso, liso y totalmente plano, ideal para cepillar caras anchas.
+
+[Ángulos] - Fresas en ángulo HM:
+Cuerpo rojo con 4 o 6 insertos de HM cuyas caras son marcadamente rectas pero inclinadas en diagonal (fuera del eje ortogonal). Firma visual del corte: Deja un plano inclinado, bisel o chanfle (ángulo alfa) limpio y recto en la arista de la tabla de madera.
+
+[Curvas] - Fresas 1/4 círculo cóncavo y convexo HM:
+Cuerpo rojo. La arista de corte tiene una única y simple curva de 90 grados (cuarto de círculo). Firma visual del corte: Mata o redondea una arista ortogonal creando una única curva convexa o cóncava que conecta dos planos rectos.
+
+[Curvas] - Fresas 1/2 círculo cóncavo y convexo HM:
+Cuerpo rojo. Arista de corte con un perfil curvo completo y simétrico de 180° en forma de "U" profunda (cóncava) o panza saliente (convexa). Firma visual del corte: Redondea completamente un canto (boleado en C) o talla una canaleta de media caña perfecta.
+
+[Molduras] - Zócalo Simple y Contramarco HM:
+Juego de fresas apilables (A y B). Cuerpo rojo macizo. Los insertos de HM presentan una silueta marcadamente asimétrica: una "ola" larga y extendida compuesta por un valle cóncavo profundo que sube tangencialmente hacia una cresta convexa estrecha, terminando en filos rectos escalonados a 90° (talones). Corte: Perfilado de terminación arquitectónica. Firma visual del corte: Deja una cara decorativa ondulada continua (tipo pecho paloma alargado) y, si se usa la fresa B, un canal rectangular profundo en la parte posterior (alivio).
+
+[Molduras] - Rinconera Simple HM:
+Cuerpo cilíndrico rojo macizo. 4 a 6 insertos de HM. Su geometría clave es un abultamiento central masivo y convexo (forma de media esfera proyectada hacia afuera) flanqueado EXACTAMENTE por dos cortes rectos horizontales (talones) en los bordes inferior y superior. Corte: Vaciado interior de esquina (Cove). Firma visual del corte: Elimina la arista de 90° y excava un canal interior perfectamente cóncavo y ancho, dejando escalones rectos a cada lado.
+
+[Molduras] - Rinconera Doble HM:
+Herramienta "sándwich". Dos cuerpos rojos con filos curvos salientes que intercalan una fina y plana hoja de sierra circular en el medio. Firma visual del corte: Talla DOS huecos cóncavos (canales) paralelos, estrictamente divididos en el centro por una hendidura o tajo recto (marca de la hoja de sierra central).
+
+[Molduras] - Frente Inglés HM:
+Juego de fresas regulables rojas (tipos A y B). El filo desciende en una línea diagonal recta a 45° (bisel) que empalma limpiamente con una curva cóncava suave en la base, contando además con dientes rectos horizontales laterales. Firma visual del corte: La cara vista de la madera tiene caída diagonal y terminación curva, mientras que en el canto oculto genera una ranura (modelo B) o una espiga machimbrada (modelo A).
+
+[Ensambles] - Machimbre Simple HM:
+Juego apilable rojo. Filos exteriores rectos con un ligero escalón en su diseño, combinados con un disco de sierra delgado de 16 dientes para el centro. Firma visual del corte: Crea lengüeta recta o canal hembra recto. Al unir dos tablas, la cara vista presenta la clásica junta hundida rectangular o un bisel simple en V.
+
+[Ensambles] - Machimbre Doble HM:
+Juego apilable rojo de alta densidad. Se diferencia visualmente del simple por utilizar DOS discos finos de sierra centrales paralelos para la pieza hembra, o un perfil central esculpido en doble espiga para el macho. Firma visual del corte: Talla estrictamente dos lengüetas (machos) o dos ranuras (hembras) gemelas y paralelas en el canto de la madera.
+
+[Ensambles] - Machimbre Piso Standard:
+Juego de 4 fresas apilables rojas. La zona de encastre interno presenta cortantes marcadamente redondeados y curvos en lugar de esquinas afiladas a 90°. Firma visual del corte: Macho de lengüeta redondeada y hembra cóncava tipo U. Al encastrar, la cara superficial deja un canal recto y estrecho de separación denominado "junta abierta".
+
+[Ensambles] - Machimbre Piso para Grampa HM:
+Juego de 4 fresas apilables rojas. Mantiene el encastre curvo del standard, pero incorpora un pequeño cortante saliente rectangular adicional. Firma visual del corte: Mismo perfil de junta abierta y macho redondeado, pero se observa claramente una pequeña ranura rectangular o muesca tallada en el labio inferior del canto (para alojamiento de grampa metálica oculta).
+
+[Ensambles] - Machimbre Piso para Grampa y Microbisel HM:
+Mega-juego de 8 fresas apilables. Mantiene encastre curvo y muesca inferior de grampa, pero suma finísimos cortantes a 45° en la zona superior. Firma visual del corte: Perfil 3-en-1: Lengüeta interna redondeada + Muesca inferior oculta para grampa + Pequeños biseles/chanfles suavizados (microbisel) en las aristas superiores de la junta abierta superficial.
+
+[Perfilado] - Deck Standard HM:
+Juego de 2 fresas rojas. Las aristas de corte presentan curvas profundas en forma de "C" envolvente diseñadas puramente para matar bordes. Firma visual del corte: Redondea las aristas superior e inferior de una tabla creando el clásico listón liso de deck superior y lateral, sin tallar ranuras internas.
+
+[Perfilado] - Deck para Grampa HM:
+Juego compuesto de 4 fresas rojas y 2 delgadas sierras metálicas centrales. Firma visual del corte: Igual que el deck standard (aristas redondeadas simultáneamente), pero incluye de forma notoria un corte o ranura profunda, delgada y recta tallada justo a lo largo de todo el espesor central de la tabla (alojamiento de grampas plásticas).
+
+[Paneles y Puertas] - Replán de Tablero HM:
+Fresa maciza roja de inmenso diámetro (ej. 200mm). Insertos de HM visualmente desproporcionados hacia lo ancho, mostrando un largo plano horizontal suave o curvo que termina en un salto. Firma visual del corte: No opera en el canto, sino rebajando enormemente el contorno de la cara de una placa, dejando una falda plana o suave declive extensa conectada a una fina lengüeta exterior de encastre.
+
+[Aberturas] - Moldura de Puertas y Ventanas HM:
+Juego compuesto por 2 masivas fresas rojas enfrentadas con una hoja de sierra intercalada en el centro geométrico. Muestran simetría de espejo perfecta. Firma visual del corte: Perfilado interno simétrico. Talla un borde decorativo (curvas u ondulaciones) en el frente y al dorso de la tabla simultáneamente, dejando una hendidura o canal recto en el centro mismo del espesor del marco (para alojar vidrio o panel).
+
+[Aberturas] - Contramolduras de Puertas y Ventanas HM:
+Cuerpo masivo rojo. Perfil de corte inverso. El rasgo visual es un sobresaliente bloque plano y rectangular en el medio, rodeado lateralmente por excavaciones o perfiles caídos. Firma visual del corte: Espiga central recta e imponente tallada en el canto de la madera, pero los apoyos laterales (hombros de la espiga) no son planos, sino que tienen caídas curvas contrapuestas para asentar con exactitud en la moldura descrita anteriormente.
+
+[Aberturas] - Moldura de Puertas y Ventanas Simple HM:
+¡ATENCIÓN IA! HERRAMIENTA MODULAR (Sistema 3 en 1). Juego rojo compuesto por 1 fresa gruesa decorativa curva y 2 fresas ranuradoras finas apilables. Firma visual del corte: Dependiendo del ensamble de las partes (Operación 1, 2 o 3) en la espigadora, una misma pieza de madera puede mostrar: A) Moldura curva con ranura central profunda. B) Contramoldura con tenón/espiga (Macho sobresaliente). C) Replán de declive ancho en la cara vista.
+
+[Paneles y Puertas] - Puerta de Muebles HM:
+¡ATENCIÓN IA! HERRAMIENTA MODULAR (Sistema 3 en 1). Juego rojo compuesto por 1 fresa gruesa cóncava/escalonada y 1 fresa plana apilable. Firma visual del corte: Exactamente igual que el modelo Simple de aberturas, la disposición de los filos permite 3 operaciones separadas de carpintería: Genera un perfil decorativo con ranura (Moldura), o la espiga correspondiente (Contramoldura) o el afinamiento perimetral para el tablero interior (Replán).
+
+[Ensambles] - Fresa para Finger HM:
+Cuerpo cilíndrico rojo macizo. Su perfil de filo es inconfundible y agresivo: múltiples dientes puntiagudos, asimétricos y afilados dispuestos en "V" estricta (patrón zig-zag afilado, peine punzante). Firma visual del corte: Ensamble finger-joint. Deja en las testas de la madera una serie estriada de picos y valles filosos y profundos que se entrelazan como nudillos.
+
+[Ensambles] - Fresa para Finger HM (hasta 45mm):
+Cuerpo rojo denso, alto y notorio (configuración 2+2). Mismo diseño dentado que el Finger base (puntas afiladas en "V"), pero su cara de corte es mucho más larga verticalmente, albergando una mayor cantidad de picos agudos continuos. Firma visual del corte: Patrón zig-zag entrelazado y profundo, pero que abarca tableros y maderas muy gruesas (travesaños de hasta 4,5 cm).
+
+[Ensambles] - Fresa para Ensamble Cónico HM:
+Juego de fresas apilables metálicas o rojas. Rasgo clave que no debe confundirse con Finger: Sus dientes extendidos terminan en puntas marcadamente PLANAS O CHATAS, conformando trapecios, nunca filos puntiagudos. Firma visual del corte: Ensamble trapezoidal en peine. Deja una sucesión gruesa de picos y canales en la madera, pero los topes siempre presentan base plana formando rectángulos (alineados, escalonados o en declive).
+
+[Ensambles] - Fresa para Encastre HM:
+Cuerpo rojo muy distintivo. El cortante cruza la geometría en un agresivo bisel recto a 45 grados, pero en medio de esta diagonal perfecta, sobresale un canal u obstáculo rectangular ortogonal. Firma visual del corte: Ensamble en inglete con traba a 45°. Deja un clásico corte oblicuo para armar marcos a escuadra (corte a 45°), pero la diagonal no es plana: esconde una espiga sólida o surco interno (diente) para impedir que la junta se deslice al pegar.
+
+[Curvas] - Fresa para Radios Múltiples HM:
+Cuerpo rojo. Perfil escalonado y continuo de aspecto ondulante, conformado por la sucesión matemática de múltiples curvas cóncavas consecutivas crecientes (R4, R6, R8, R10). Firma visual del corte: Aunque la herramienta es ondulada entera, en la tabla de madera realiza exclusivamente el redondeo simple y liso (un solo arco, cuarto de círculo) de una única arista o canto en uso, según qué fracción del filo se empleó.
+
+[Molduras] - Fresa Multimoldura:
+Cuerpo cilíndrico masivo rojo, llamativamente provisto de unicamente dos insertos (Z=2). Su filo HM dibuja una curva extremadamente extendida, un mapa topográfico continuo compuesto de picos, valles suaves, saltos planos y lomas. Firma visual del corte: Fresa arquitectónica matriz. Jamás marca su perfil íntegro en la madera; talla un segmento minúsculo a la vez. Mediante ajuste vertical en el tupí, produce incontables y distintas variedades de molduras finas y combinadas.
+"""
+
 BASE_CONOCIMIENTO = """
 Eres un asesor profesional sobre la carpintería, te destacas por dar consejos para que las personas compren las herramientas de mejor calidad ofreciendo opciones tanto de gran calidad pero alto precio pero también un precio más económico pero menor calidad (obviamente aclarando siempre que es calidad profesional las herramientas).
 Utilizar un tono amigable, pero sin irte por otros lados y siempre mantenerse en la fila de información.
@@ -534,12 +543,10 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
         tel_vend = "[Tel_Elegido]"
         texto_contexto = """CONTEXTO: Cliente "Orgánico". Si es el primer mensaje o AÚN no sabes con qué asesor quiere hablar, pregunta si prefiere a Carlos, Valentín o Emmanuel. ¡ATENCIÓN!: Si revisas el historial y el cliente ya eligió a uno o dijo que "le da igual", "cualquiera" o "no sé", TIENES ESTRICTAMENTE PROHIBIDO volver a preguntarlo. Si le da igual, asume uno en silencio."""
 
-    catalogo_ia_dinamico = obtener_catalogo_desde_db()
-
     return f"""
 {BASE_CONOCIMIENTO}
 
-{catalogo_ia_dinamico}
+{CATALOGO_IA_ESTATICO}
 
 {texto_contexto}
 
@@ -642,7 +649,7 @@ Eres un experto analizando herramientas de carpintería. El cliente ha enviado u
 REGLA DE DESEMPATE 1: MOLDURAS VS ZÓCALOS VS ABERTURAS (¡EL ERROR MÁS COMÚN!)
 Si ves una madera con un perfil decorativo curvo (tipo pecho paloma o lomas):
 - ¿Tiene una RANURA PROFUNDA y estrecha en el medio del canto (para un vidrio/tablero)? -> Es "Moldura de Puertas y Ventanas" o "Moldura Simple". ¡NO es Zócalo!
-- ¿Tiene una ESPIGA / MACHO RECTO que sobresale en el medio del canto? -> Es "Contramoldura". ¡NO es Zócalo!
+- ¿Tiene una ESPIGA / MACHO RECTO que sobresale en el medio del canto o un rebaje pronunciado para esa espiga? -> Es "Contramoldura". ¡NO es Zócalo!
 - ¿Es un rebaje muy ANCHO y extenso sobre la CARA PLANA de la madera, afinando el borde para encastrar? -> Es "Replán de Tablero" o la función replán de la "Moldura Simple". ¡NO es Zócalo!
 - ¿Es una caída recta en diagonal a 45° que luego termina en una curvita? -> Es "Frente Inglés".
 - ¿Es un relieve ondulado continuo en un borde, SIN ranuras al medio, SIN espigas al medio, que se usa contra la pared o piso? -> SOLO ENTONCES es "Zócalo Simple y Contramarco HM".
@@ -652,7 +659,7 @@ REGLA DE DESEMPATE 2: ENSAMBLES FINGER VS CÓNICO
 - Dientes con puntas CHATAS, PLANAS o CUADRADAS (trapecios) -> "Fresa para Ensamble Cónico HM".
 
 PASO 1: ACCIÓN OBLIGATORIA DE RESPUESTA
-1. Identifica la herramienta usando las REGLAS DE DESEMPATE.
+1. Identifica la herramienta usando las REGLAS DE DESEMPATE cruzando los datos visuales con la variable CATALOGO_IA_ESTATICO que tienes en tu prompt principal.
 2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto (Ej: "¡Claro! Por el perfil que me mostrás en la foto, lo que necesitas es una [Nombre de la Fresa]").
 3. NUNCA menciones códigos internos en el texto.
 4. NUNCA le preguntes qué perfil busca (¡ya lo viste en la foto!).
