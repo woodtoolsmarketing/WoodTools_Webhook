@@ -156,7 +156,7 @@ def enviar_mensaje_whatsapp(telefono_destino, texto, link_boton=None):
                 "action": {
                     "name": "cta_url",
                     "parameters": {
-                        "display_text": "Hablar con asesor",
+                        "display_text": "Enviar Carrito al Asesor",
                         "url": link_boton
                     }
                 }
@@ -397,7 +397,6 @@ Utilizar un tono amigable, pero sin irte por otros lados y siempre mantenerse en
 Para brindar información no utilizar información de otras marcas que no sean WoodTools, Freud o Franzoi.
 No dar precios, en caso de que te pregunten sobre precios redirigirlos al chat de whatsapp.
 Tu labor además de informar es indagar por lo que tenes que ir preguntando de manera sutil: Qué herramienta necesita, qué materiales quiere cortar, en qué medida y cuál es la máquina que utiliza.
-A la hora de redirigir al chat que el mensaje del enlace contenga el nombre de la herramienta y sus medidas, la información recolectada en la indagación y cuantas unidades necesita.
 
 ⚠️ REGLA DE ORO DE CONFIDENCIALIDAD (CÓDIGOS INTERNOS) ⚠️
 Los códigos alfanuméricos de las herramientas (ej: LU3F-0200, LU5B 0300, LG3D 0600, FRS0054, CHC050420HSS, etc.) que verás a continuación son ESTRICTAMENTE DE USO INTERNO. 
@@ -422,7 +421,7 @@ Actúa como un asistente técnico al brindar información sobre este ítem, bás
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud (Italia), modelo LG3D 0400, cuenta con un diámetro exterior de 250 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Melamina (con incisor).
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud (origen Italia), modelo LU3F 0300, cuenta con un diámetro exterior de 300 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Aglomerado, MDF, Madera y Melamina (modelo para Melamina sin incisor).
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo F03FS09801, cuenta con un diámetro exterior de 185 mm, un ancho de corte (espesor) de 2,4 cm y un diámetro central de 20 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Aglomerado, MDF, Madera y Melamina.
-Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud (origen Italia), modelo LU3F 0300, cuenta con un diámetro exterior de 300 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Aglomerado, MDF y Melamina.
+Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud (origen Italia), modelo LU3F 0300, cuenta con un diámetro exterior de 300 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto specifically para superficies de Aglomerado, MDF y Melamina.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LG3D 0400/LI25M31FA3, cuenta con un diámetro exterior de 250 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Melamina.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud (origen Italia), modelo FR12L001H, cuenta con un diámetro exterior de 185 mm, un ancho de corte (espesor) de 2,4 cm y un diámetro central de 20 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Aglomerado, MDF, Madera y Melamina.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU3D 0600/ LI25M 31FA3, cuenta con un diámetro exterior de 300 mm, un ancho de corte (espesor) de 3,2 cm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Melamina.
@@ -538,11 +537,13 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
             nombre_vendedor_ia = "tu asesor"
             tel_vend = "5491145394279"
             
-        texto_contexto = f"""CONTEXTO DE LA CAMPAÑA: El cliente respondió a la campaña "{tipo_camp}". VENDEDOR ASIGNADO: {nombre_vendedor_ia}."""
+        texto_contexto = f"""CONTEXTO DE LA CAMPAÑA: El cliente respondió a la campaña "{tipo_camp}". VENDEDOR ASIGNADO: {nombre_vendedor_ia} (Número: {tel_vend})."""
     else:
-        nombre_vendedor_ia = "[Elegido_por_ti]"
-        tel_vend = "[Tel_Elegido]"
-        texto_contexto = """CONTEXTO: Cliente "Orgánico". Si es el primer mensaje o AÚN no sabes con qué asesor quiere hablar, pregunta si prefiere a Carlos, Valentín o Emmanuel. ¡ATENCIÓN!: Si revisas el historial y el cliente ya eligió a uno o dijo que "le da igual", "cualquiera" o "no sé", TIENES ESTRICTAMENTE PROHIBIDO volver a preguntarlo. Si le da igual, asume uno en silencio."""
+        nombre_vendedor_ia = "[Aún no elegido]"
+        tel_vend = "5491145394279" # Default fallback
+        texto_contexto = """CONTEXTO: Cliente "Orgánico". VENDEDOR ASIGNADO: Aún no elegido.
+        ¡REGLA OBLIGATORIA DE SALUDO!: Si es el primer mensaje y el vendedor aún no está elegido, debes saludar y PREGUNTAR OBLIGATORIAMENTE si prefiere hablar con Carlos, Valentín o Emmanuel.
+        Una vez que elija a uno (o si dice que le da igual), guárdalo en tu memoria silenciosamente, asume su número y no lo vuelvas a preguntar. Los números son: Carlos (5491165630406), Valentín (5491145394279), Emmanuel (5491157528428)."""
 
     return f"""
 {BASE_CONOCIMIENTO}
@@ -569,17 +570,20 @@ REGLA DE PRECIOS Y MATEMÁTICA:
 1. MATEMÁTICA Y UNIDADES: Toma ÚNICAMENTE el valor del último mensaje del cliente. Prohibido sumar o juntar números de mensajes anteriores.
 2. Si preguntan precio sin darte todos los datos, diles: "Los precios te los pasa el asesor. Para armar el presupuesto, contame [tu siguiente pregunta]".
 
-CIERRE Y ENLACE FINAL (DERIVACIÓN ACUMULATIVA):
-1. En cuanto tengas la CANTIDAD, TIENES QUE ENVIAR EL ENLACE DE DERIVACIÓN INMEDIATAMENTE. No pidas permiso para derivar.
-2. La variable [INFO] del enlace DEBE SER UN RESUMEN COMPLETO de todo lo charlado.
-3. NO ELIMINES ninguna barra (/) ni el número de teléfono {tel_10_digitos}. 
-4. El enlace debe ir OBLIGATORIAMENTE AL FINAL ABSOLUTO de tu mensaje, sin nada debajo.
+REGLA DEL CARRITO DE COMPRAS Y CIERRE (¡NUEVO Y OBLIGATORIO!):
+1. Cuando el cliente te diga la CANTIDAD de la herramienta, ¡NO ENVÍES EL ENLACE DE DERIVACIÓN TODAVÍA!
+2. Debes confirmar su pedido y PREGUNTAR OBLIGATORIAMENTE: "¿Te gustaría agregar alguna otra herramienta o cerramos la cotización?".
+3. Si el cliente quiere otra herramienta, repite el embudo acumulando todo en tu memoria.
+4. SOLO SI el cliente dice "no", "nada más", "eso es todo" o "cerramos", ENTONCES debes generar el enlace de derivación final agrupando TODO lo que pidió.
 
-El enlace EXACTO debe copiar y pegar esta estructura literal (reemplazando solo el telefono del asesor y el texto con los datos, codificando espacios con %20):
-https://woodtools-webhook.onrender.com/wa/{tanda_id}/{tel_10_digitos}/[PONER_AQUI_TELEFONO_ASESOR]?text=Hola,%20necesito%20cotizar:%20[CODIGO]%20-%20[INFO]%20-%20[CANTIDAD]%20unidades
+FORMATO ESTRICTO DEL ENLACE DE DERIVACIÓN:
+El enlace debe contener todos los productos acumulados en forma de lista. DEBES reemplazar CADA ESPACIO en blanco dentro del enlace por "%20" y CADA SALTO DE LÍNEA por "%0A". La estructura debe ser LITERALMENTE esta (todo en una sola línea sin espacios reales):
+
+https://woodtools-webhook.onrender.com/wa/{tanda_id}/{tel_10_digitos}/[TELEFONO_DEL_ASESOR_ELEGIDO]?text=Hola,%20quiero%20cotización%20de:%0A-%20[producto1]%20[medida1]%20[cantidad1]%0A-%20[producto2]%20[medida2]%20[cantidad2]
 """
 
 def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=None):
+    # Comando de Reset Ultra Flexible
     if texto_entrante and "reset" in texto_entrante.strip().lower():
         tel_10 = extraer_10_digitos(telefono_cliente)
         res_hist = execute_db_query("SELECT historial FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), fetchone=True)
@@ -594,7 +598,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
             
         execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), commit=True)
         execute_db_query("DELETE FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), commit=True)
-        enviar_mensaje_whatsapp(telefono_cliente, "✅ *Memoria y campaña borrada exitosamente.*\nEl historial quedó registrado en Abandonados y tu número está limpio.\n\nEscribime un 'Hola' para empezar desde cero como un cliente Orgánico.")
+        enviar_mensaje_whatsapp(telefono_cliente, "✅ *Memoria y carrito borrados exitosamente.*\nEl historial quedó registrado y tu número está limpio.\n\nEscribime un 'Hola' para empezar desde cero.")
         return
 
     resultado = execute_db_query("SELECT historial, ultima_interaccion FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), fetchone=True)
@@ -635,7 +639,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
     else:
         historial = [
             {"role": "user", "parts": [prompt_dinamico]},
-            {"role": "model", "parts": ["Entendido. Guardaré en memoria todos los servicios, seré breve, no repetiré saludos, haré bien la matemática de unidades y no avisaré si me dicen que el vendedor les da igual."]}
+            {"role": "model", "parts": ["Entendido. Guardaré en memoria el carrito, seré breve, no repetiré saludos, preguntaré si quiere algo más antes de derivar, y no preguntaré el espesor de la madera."]}
         ]
         
     texto_para_historial = texto_entrante if texto_entrante else "[El usuario envió una imagen para analizar]"
@@ -672,10 +676,10 @@ PASO 3: ¿Moldura o Multimoldura?
 
 PASO 4: ACCIÓN OBLIGATORIA DE RESPUESTA
 1. Identifica el producto usando la lógica correcta (Madera vs Herramienta).
-2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto. (Ej: "¡Claro! Por el perfil de ensamble que veo en esa muestra de madera, lo que necesitas es una Fresa para Ensamble Cónico HM").
+2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto.
 3. NUNCA menciones códigos alfanuméricos internos.
 4. Continúa tu embudo preguntando SOLO los datos que te falten para cotizar: Diámetro/Ancho de la HERRAMIENTA (leyendo tus opciones del catálogo), Máquina que utiliza, o Cantidad. 
-5. REGLA DE FUEGO: TIENES ESTRICTAMENTE PROHIBIDO usar la palabra "espesor de madera" o preguntarle al cliente por el espesor de la madera. Si necesitas datos de medida, ofrécele las medidas de la herramienta que dice el catálogo.
+5. REGLA DE FUEGO: TIENES ESTRICTAMENTE PROHIBIDO usar la palabra "espesor de madera" o preguntarle al cliente por el espesor de la madera.
 """
             contenido = [param_vision, imagen_pil]
             if texto_entrante:
@@ -688,9 +692,10 @@ PASO 4: ACCIÓN OBLIGATORIA DE RESPUESTA
         texto_limpio = texto_respuesta
         link_extraido = None
         
-        match = re.search(r'(https://woodtools-webhook\.onrender\.com/wa/\S+)', texto_respuesta)
+        # Extraer enlace robusto ignorando la puntuación final
+        match = re.search(r'(https://woodtools-webhook\.onrender\.com/wa/[^\s<>]+)', texto_respuesta)
         if match:
-            link_extraido = match.group(1)
+            link_extraido = match.group(1).rstrip('.",\'')
             texto_limpio = texto_respuesta.replace(link_extraido, "").strip()
             texto_limpio = texto_limpio.replace("👉", "").replace("Hacé clic en este enlace para hablar con él", "").strip()
         
@@ -728,14 +733,14 @@ PASO 4: ACCIÓN OBLIGATORIA DE RESPUESTA
         
     except Exception as e:
         print(f"Error con Gemini: {e}")
-        enviar_mensaje_whatsapp(telefono_cliente, f"🤖 Dame un momento, estoy consultando el catálogo...")
+        enviar_mensaje_whatsapp(telefono_cliente, f"🤖 Dame un momento, estoy armando tu carrito...")
 
 # ==========================================
 # RUTAS DEL WEBHOOK Y NUEVOS ENDPOINTS
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (Versión Visión + Anti-Códigos) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (Versión Carrito de Compras) 🚀", 200
 
 @app.route('/wa/<tanda_id>/<telefono_cliente>/<vendedor>', methods=['GET'])
 def redirect_whatsapp(tanda_id, telefono_cliente, vendedor):
@@ -784,7 +789,7 @@ def redirect_whatsapp(tanda_id, telefono_cliente, vendedor):
         </script>
     </head>
     <body>
-        <h2>Conectando con tu asesor...</h2>
+        <h2>Enviando Carrito al asesor...</h2>
         <div class="loader"></div>
         <p>Si la aplicación no se abre automáticamente,<br><br><a href="https://wa.me/{vendedor_link}?text={texto_codificado}">Haz clic aquí para chatear</a>.</p>
     </body>
@@ -844,18 +849,18 @@ def recibir_notificaciones():
                     print(f"📩 MENSAJE de {telefono_cliente}: {texto_cliente}", flush=True)
                     registrar_metrica('responded', telefono_cliente) 
                     
-                    # PROCESAR EN SEGUNDO PLANO PARA EVITAR MENSAJES DOBLES
+                    # PROCESAR EN SEGUNDO PLANO PARA EVITAR MENSAJES DOBLES DE WHATSAPP
                     threading.Thread(target=procesar_mensaje_con_gemini, args=(telefono_cliente, texto_cliente)).start()
                 
                 elif mensaje['type'] == 'image':
                     telefono_cliente = limpiar_numero(mensaje['from'])
                     media_id = mensaje['image']['id']
-                    texto_cliente = mensaje['image'].get('caption', '') # Obtiene el texto si mandó la foto con un comentario
+                    texto_cliente = mensaje['image'].get('caption', '') 
                     
                     print(f"📸 IMAGEN de {telefono_cliente} - Descargando para análisis...", flush=True)
                     registrar_metrica('responded', telefono_cliente)
                     
-                    # FUNCIÓN INTERNA PARA EL HILO DE LA IMAGEN
+                    # FUNCION EN SEGUNDO PLANO PARA IMAGENES
                     def procesar_imagen_bg(tel, txt, m_id):
                         img_pil = descargar_imagen_whatsapp(m_id)
                         if img_pil:
@@ -863,7 +868,6 @@ def recibir_notificaciones():
                         else:
                             procesar_mensaje_con_gemini(tel, "Te envié una imagen pero hubo un error al cargarla. " + txt)
                             
-                    # EJECUTAR DESCARGA Y ANÁLISIS EN SEGUNDO PLANO
                     threading.Thread(target=procesar_imagen_bg, args=(telefono_cliente, texto_cliente, media_id)).start()
                 
             elif 'statuses' in cambios:
