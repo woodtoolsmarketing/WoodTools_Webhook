@@ -558,8 +558,8 @@ REGLAS DE FORMATO Y BREVEDAD (¡CRÍTICO Y OBLIGATORIO!):
 REGLAS DE INDAGACIÓN Y MEMORIA (¡ANTI-AMNESIA!):
 1. SALUDO ÚNICO Y PREGUNTA DE ASESOR: Revisa tu historial. Si ya saludaste o ya preguntaste por el asesor, TIENES PROHIBIDO volver a hacerlo.
 2. MEMORIA DE HERRAMIENTA: Si ya identificaste la herramienta (ej: por una foto o porque el cliente lo dijo), NO TE OLVIDES ni ofrezcas otras. Si ya eligió herramienta, NO vuelvas a ofrecer el menú de rectas, cepillado o moldura.
-3. SECUENCIA PARA FRESAS: Herramienta -> Medidas de la herramienta -> Máquina -> Cantidad. ¡PROHIBIDO preguntar el espesor de la madera!
-4. MOSTRAR MEDIDAS: Cuando preguntes por la medida de la herramienta, OBLIGATORIAMENTE debes leer el catálogo y mostrarle al cliente las medidas disponibles (Diámetro exterior D, Ancho de corte B) para que elija.
+3. SECUENCIA PARA FRESAS: Herramienta -> Medidas de la HERRAMIENTA -> Máquina -> Cantidad. 
+4. REGLA DE FUEGO (ESPESOR): ¡TIENES ESTRICTAMENTE PROHIBIDO PREGUNTAR POR EL ESPESOR DE LA MADERA EN FRESAS! Jamás uses la palabra "espesor". Pregunta siempre por el Diámetro exterior (D) o Ancho de corte (B) de la herramienta basándote en las opciones del catálogo.
 
 REGLA DE PRECIOS Y MATEMÁTICA:
 1. MATEMÁTICA Y UNIDADES: Toma ÚNICAMENTE el valor del último mensaje del cliente. Prohibido sumar o juntar números de mensajes anteriores.
@@ -648,9 +648,11 @@ Primero, determina inmediatamente si la foto muestra una HERRAMIENTA (metal, pin
 
 === REGLA EXCLUSIVA PARA FOTOS DE MADERA (MUESTRAS DE CORTE) ===
 Si la imagen es un trozo de madera mostrando su perfil:
-1. ¿Es un ensamble de picos muy afilados en estricto zig-zag ("V" repetitiva) en la testa? -> Es "Fresa para Finger HM".
+1. ¿Tiene forma de dientes o peine para unir (ensamblar) maderas?
+   - Si los dientes terminan en PUNTAS CHATAS O PLANAS (rectángulos/trapecios): Es "Fresa para Ensamble Cónico HM".
+   - Si los dientes terminan en PUNTAS MUY AFILADAS (en forma de "V" estricta o zig-zag): Es "Fresa para Finger HM".
 2. ¿Tiene una ranura recta/canal profundo justo en el medio del canto? -> Es para "Moldura de Puertas y Ventanas" o "Machimbre".
-3. ¿Es una forma decorativa compleja en el borde que combina curvas, lomas, picos agudos o escalones, sin canales en el medio? -> ES LA "FRESA MULTIMOLDURA". La Multimoldura es el comodín de la carpintería. Si ves un perfil de madera complejo (como un zócalo asimétrico, un pecho paloma, o cortes con picos interiores), asume que es la Multimoldura.
+3. ¿Es una forma decorativa compleja en el borde que combina curvas, lomas, picos agudos o escalones, sin canales en el medio? -> ES LA "FRESA MULTIMOLDURA". La Multimoldura es el comodín de la carpintería.
 
 === REGLA EXCLUSIVA PARA FOTOS DE HERRAMIENTAS (METAL/ROJO) ===
 PASO 1: ¿Rodillo muy ancho con 40-100 plaquitas cuadradas? -> "Cabezal Cepillador HM".
@@ -666,9 +668,10 @@ PASO 3: ¿Moldura o Multimoldura?
 
 PASO 4: ACCIÓN OBLIGATORIA DE RESPUESTA
 1. Identifica el producto usando la lógica correcta (Madera vs Herramienta).
-2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto. (Ej: "¡Claro! Por el perfil que veo en esa muestra de madera, lo que necesitas es una Fresa Multimoldura, que te permite hacer esa y muchas otras formas").
+2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto. (Ej: "¡Claro! Por el perfil de ensamble que veo en esa muestra de madera, lo que necesitas es una Fresa para Ensamble Cónico HM").
 3. NUNCA menciones códigos alfanuméricos internos.
-4. Continúa tu embudo preguntando SOLO los datos que te falten: Medida de la herramienta (¡muéstrale las opciones del catálogo!), Máquina que utiliza, o Cantidad. NUNCA pidas el espesor de la madera.
+4. Continúa tu embudo preguntando SOLO los datos que te falten para cotizar: Diámetro/Ancho de la HERRAMIENTA (leyendo tus opciones del catálogo), Máquina que utiliza, o Cantidad. 
+5. REGLA DE FUEGO: TIENES ESTRICTAMENTE PROHIBIDO usar la palabra "espesor de madera" o preguntarle al cliente por el espesor de la madera. Si necesitas datos de medida, ofrécele las medidas de la herramienta que dice el catálogo.
 """
             contenido = [param_vision, imagen_pil]
             if texto_entrante:
