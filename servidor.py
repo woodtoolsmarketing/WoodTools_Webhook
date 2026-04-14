@@ -579,7 +579,7 @@ REGLAS DE INDAGACIÓN Y MEMORIA (¡ANTI-AMNESIA Y EMBUDO ESTRICTO!):
 2. FLEXIBILIDAD ANTE CORRECCIONES: Si le ofreces una herramienta y el cliente TE CORRIGE EXPLÍCITAMENTE (ej. "No es eso", "Necesito un rebaje", "Eso es un marco"), ¡TIENES PERMITIDO CAMBIAR DE HERRAMIENTA! Adapta tu recomendación a la nueva información. NO te aferres tercamente a tu primera opción.
 3. FIDELIDAD ABSOLUTA DE HERRAMIENTA: A menos que el cliente te corrija, una vez que ambos acuerdan qué herramienta necesita, MANTENLA FIJA. Si te da una medida o máquina, anota ese dato a la herramienta acordada.
 4. EMBUDO HACIA ADELANTE: Si ya identificaste la herramienta, ESTÁ ESTRICTAMENTE PROHIBIDO volver a preguntar si busca recta, moldura o cepillado.
-5. FLUIDEZ Y SECUENCIA: Haz las preguntas PASO A PASO. No hagas dos preguntas distintas en un mismo mensaje para no abrumar al cliente.
+5. FLUIDEZ Y AVANCE RÁPIDO: Haz las preguntas PASO A PASO. Si el cliente te da un dato (ej: "la de 245mm"), ¡NO LE PIDAS QUE LO CONFIRME! Acéptalo y avanza a la siguiente pregunta (Máquina o Cantidad). ¡PROHIBIDO pedir confirmaciones redundantes!
 6. RESPONDER "CUALES HAY": Si preguntan "¿cuáles hay?", busca la herramienta actual en tu conocimiento y muéstrale claramente los Diámetros (D) y Anchos de Corte (B) disponibles.
 7. REGLA DE FUEGO (ESPESOR): ¡TIENES ESTRICTAMENTE PROHIBIDO PREGUNTAR POR EL ESPESOR DE LA MADERA EN FRESAS! Jamás uses la palabra "espesor".
 8. BOTÓN DE PÁNICO (DERIVACIÓN INMEDIATA): Si el cliente pide hablar con un "humano", "vendedor", "persona" o "asesor", ESTÁ PROHIBIDO hacerle más preguntas de venta. Genera INMEDIATAMENTE el enlace de derivación con la información que tengas.
@@ -588,10 +588,10 @@ REGLA DEL CARRITO DE COMPRAS Y CIERRE (¡NUEVO Y OBLIGATORIO!):
 1. Cuando el cliente te diga la CANTIDAD de la herramienta, ¡NO ENVÍES EL ENLACE DE DERIVACIÓN TODAVÍA!
 2. Debes confirmar su pedido y PREGUNTAR OBLIGATORIAMENTE: "¿Te gustaría agregar alguna otra herramienta o cerramos la cotización?".
 3. Si el cliente quiere otra herramienta, repite el embudo acumulando todo en tu memoria.
-4. SOLO SI el cliente dice "no", "nada mas", "eso es todo" o "ya estaria", ENTONCES debes generar el enlace de derivación final agrupando TODO lo que pidió.
+4. CIERRE DIRECTO: Si el cliente indica de cualquier forma que NO quiere más herramientas (ej: "con eso ya estaría", "cerramos", "nada más", "solo eso", "no", "ya estaria"), TIENES ESTRICTAMENTE PROHIBIDO volver a preguntarle si quiere algo más. Genera EL ENLACE DE DERIVACIÓN INMEDIATAMENTE.
 
 FORMATO ESTRICTO DEL ENLACE DE DERIVACIÓN:
-¡PROHIBIDO CORTAR EL ENLACE! Escríbelo completo de principio a fin, sin poner "..." al final. NO USES TILDES, ACENTOS NI LA LETRA "Ñ" DENTRO DE LA URL.
+¡PROHIBIDO CORTAR EL ENLACE! Escríbelo completo de principio a fin, sin poner "..." al final. NO USES TILDES, ACENTOS NI LA LETRA "Ñ" DENTRO DE LA URL. IMPRIME SOLO LA URL CRUDA (sin formato Markdown de texto azul).
 El enlace debe contener todos los productos acumulados en forma de lista. La estructura debe ser LITERALMENTE esta (todo en una sola línea sin espacios reales):
 
 https://woodtools-webhook.onrender.com/wa/{tanda_id}/{tel_10_digitos}/[TELEFONO_DEL_ASESOR_ELEGIDO]?text=Hola,%20quiero%20cotizacion%20de:%0A-%20[producto1]%20[medida1]%20[cantidad1]%0A-%20[producto2]%20[medida2]%20[cantidad2]
@@ -655,7 +655,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
         else:
             historial = [
                 {"role": "user", "parts": [prompt_dinamico]},
-                {"role": "model", "parts": ["Entendido. Guardaré en memoria el carrito, seré breve, no usaré tildes en la URL, preguntaré si quiere algo más, y recordaré que las fresas NO son Freud y que debo preguntar una sola cosa a la vez sin mezclar asesor con herramientas."]}
+                {"role": "model", "parts": ["Entendido. Guardaré en memoria el carrito, seré breve, no usaré tildes en la URL, entenderé sinónimos para cerrar la venta, no pediré confirmaciones de datos redundantes, y recordaré que las fresas NO son Freud."]}
             ]
             
         if imagen_pil:
@@ -694,7 +694,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
     
     PASO 4: ACCIÓN OBLIGATORIA DE RESPUESTA
     1. Identifica el producto usando la lógica correcta.
-    2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto. (Ej: "¡Claro! Por el perfil que veo, lo que necesitas es una Fresa Multimoldura").
+    2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto.
     3. NUNCA menciones códigos alfanuméricos internos. NUNCA digas que la fresa es marca Freud.
     4. Continúa tu embudo preguntando SOLO los datos que te falten para cotizar: Diámetro/Ancho (leyendo tus opciones), Máquina que utiliza, o Cantidad. 
     5. REGLA DE FUEGO: TIENES ESTRICTAMENTE PROHIBIDO usar la palabra "espesor de madera".
@@ -710,14 +710,12 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
             texto_limpio = texto_respuesta
             link_extraido = None
             
-            # Extraer enlace robusto y codificar SIN TILDES
             match = re.search(r'(https://woodtools-webhook\.onrender\.com/wa/[^\s<>]+)', texto_respuesta)
             if match:
                 raw_url = match.group(1).rstrip('.",\'')
                 texto_limpio = texto_respuesta.replace(raw_url, "").strip()
                 texto_limpio = texto_limpio.replace("👉", "").replace("Hacé clic en este enlace para hablar con él", "").strip()
                 
-                # Quitar codificaciones previas erróneas, pasar a minúsculas sin acentos, y volver a codificar de forma segura
                 import unicodedata
                 url_limpia = urllib.parse.unquote(raw_url)
                 url_limpia = ''.join((c for c in unicodedata.normalize('NFD', url_limpia) if unicodedata.category(c) != 'Mn'))
@@ -872,7 +870,6 @@ def recibir_notificaciones():
                     if msg_id in processed_msg_ids:
                         return jsonify({"status": "ok"}), 200
                     processed_msg_ids.add(msg_id)
-                    # Limpiamos para que la RAM no se llene si llegan miles de mensajes
                     if len(processed_msg_ids) > 1000:
                         processed_msg_ids.clear()
 
@@ -883,7 +880,6 @@ def recibir_notificaciones():
                     print(f"📩 MENSAJE de {telefono_cliente}: {texto_cliente}", flush=True)
                     registrar_metrica('responded', telefono_cliente) 
                     
-                    # PROCESAR EN SEGUNDO PLANO PARA EVITAR DEMORAS EN EL WEBHOOK
                     threading.Thread(target=procesar_mensaje_con_gemini, args=(telefono_cliente, texto_cliente)).start()
                 
                 elif mensaje['type'] == 'image':
@@ -894,7 +890,6 @@ def recibir_notificaciones():
                     print(f"📸 IMAGEN de {telefono_cliente} - Descargando para análisis...", flush=True)
                     registrar_metrica('responded', telefono_cliente)
                     
-                    # FUNCION EN SEGUNDO PLANO PARA IMAGENES
                     def procesar_imagen_bg(tel, txt, m_id):
                         img_pil = descargar_imagen_whatsapp(m_id)
                         if img_pil:
