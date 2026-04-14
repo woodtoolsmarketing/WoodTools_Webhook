@@ -14,6 +14,7 @@ from psycopg2 import pool
 import re 
 import io
 from PIL import Image
+import threading
 
 app = Flask(__name__)
 
@@ -557,10 +558,12 @@ REGLAS DE FORMATO Y BREVEDAD (¡CRÍTICO Y OBLIGATORIO!):
 
 REGLAS DE INDAGACIÓN Y MEMORIA (¡ANTI-AMNESIA Y EMBUDO ESTRICTO!):
 1. SALUDO ÚNICO Y PREGUNTA DE ASESOR: Revisa tu historial. Si ya saludaste o ya preguntaste por el asesor, TIENES PROHIBIDO volver a hacerlo.
-2. EMBUDO HACIA ADELANTE (ANTI-BUCLES): Si ya identificaste la herramienta (ej: por una foto o porque el cliente lo dijo), ESTÁ ESTRICTAMENTE PROHIBIDO volver a preguntar qué tipo de fresa (recta, moldura, cepillado) busca. Ya pasaste esa etapa. Avanza.
-3. SECUENCIA PARA FRESAS: Herramienta -> Medidas de la HERRAMIENTA -> Máquina -> Cantidad. 
-4. RESPONDER "CUALES HAY" (MOSTRAR MEDIDAS): Si el cliente te pregunta "¿cuáles hay?", "¿qué medidas tienen?", OBLIGATORIAMENTE lee tu BASE DE CONOCIMIENTO, busca la herramienta actual (ej: Fresa para Ensamble Cónico) y muéstrale claramente las medidas disponibles (Diámetro D y Ancho B) para que elija.
-5. REGLA DE FUEGO (ESPESOR): ¡TIENES ESTRICTAMENTE PROHIBIDO PREGUNTAR POR EL ESPESOR DE LA MADERA EN FRESAS! Jamás uses la palabra "espesor". Pregunta siempre por el Diámetro exterior (D) o Ancho de corte (B).
+2. FIDELIDAD DE HERRAMIENTA (ANTI-ALUCINACIÓN): Si ya identificaste la herramienta (ej. "Ensamble Cónico") y el cliente elige una medida (ej. "160mm"), ¡MANTÉN EL NOMBRE DE LA HERRAMIENTA ORIGINAL! NO la cambies por otra del catálogo solo porque coincide la medida.
+3. CARRITO DE COMPRAS (MÚLTIPLES FOTOS): Si el cliente manda una NUEVA foto y pide otra herramienta, NO OLVIDES la anterior. Sigue acumulando las herramientas (ej: "Ya anoté la de Ensamble, ahora para esta nueva foto necesitas...") y suma ambas al link final.
+4. EMBUDO HACIA ADELANTE: Si ya identificaste la herramienta por foto, ESTÁ ESTRICTAMENTE PROHIBIDO volver a preguntar si busca recta, moldura o cepillado.
+5. SECUENCIA PARA FRESAS: Herramienta -> Medidas de la HERRAMIENTA -> Máquina -> Cantidad. 
+6. RESPONDER "CUALES HAY" (MOSTRAR MEDIDAS): Si preguntan "¿cuáles hay?", busca la herramienta actual en tu conocimiento y muéstrale claramente las medidas disponibles (Diámetro D y Ancho B).
+7. REGLA DE FUEGO (ESPESOR): ¡TIENES ESTRICTAMENTE PROHIBIDO PREGUNTAR POR EL ESPESOR DE LA MADERA EN FRESAS! Jamás uses la palabra "espesor".
 
 REGLA DE PRECIOS Y MATEMÁTICA:
 1. MATEMÁTICA Y UNIDADES: Toma ÚNICAMENTE el valor del último mensaje del cliente. Prohibido sumar o juntar números de mensajes anteriores.
@@ -577,7 +580,7 @@ https://woodtools-webhook.onrender.com/wa/{tanda_id}/{tel_10_digitos}/[PONER_AQU
 """
 
 def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=None):
-    if texto_entrante and texto_entrante.strip().lower() in ["reset", "resetear", "reiniciar"]:
+    if texto_entrante and "reset" in texto_entrante.strip().lower():
         tel_10 = extraer_10_digitos(telefono_cliente)
         res_hist = execute_db_query("SELECT historial FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), fetchone=True)
         if res_hist:
@@ -840,7 +843,9 @@ def recibir_notificaciones():
                     texto_cliente = mensaje['text']['body']
                     print(f"📩 MENSAJE de {telefono_cliente}: {texto_cliente}", flush=True)
                     registrar_metrica('responded', telefono_cliente) 
-                    procesar_mensaje_con_gemini(telefono_cliente, texto_cliente)
+                    
+                    # PROCESAR EN SEGUNDO PLANO PARA EVITAR MENSAJES DOBLES
+                    threading.Thread(target=procesar_mensaje_con_gemini, args=(telefono_cliente, texto_cliente)).start()
                 
                 elif mensaje['type'] == 'image':
                     telefono_cliente = limpiar_numero(mensaje['from'])
@@ -850,11 +855,16 @@ def recibir_notificaciones():
                     print(f"📸 IMAGEN de {telefono_cliente} - Descargando para análisis...", flush=True)
                     registrar_metrica('responded', telefono_cliente)
                     
-                    imagen_pil = descargar_imagen_whatsapp(media_id)
-                    if imagen_pil:
-                        procesar_mensaje_con_gemini(telefono_cliente, texto_cliente, imagen_pil=imagen_pil)
-                    else:
-                        procesar_mensaje_con_gemini(telefono_cliente, "Te envié una imagen pero hubo un error al cargarla. " + texto_cliente)
+                    # FUNCIÓN INTERNA PARA EL HILO DE LA IMAGEN
+                    def procesar_imagen_bg(tel, txt, m_id):
+                        img_pil = descargar_imagen_whatsapp(m_id)
+                        if img_pil:
+                            procesar_mensaje_con_gemini(tel, txt, imagen_pil=img_pil)
+                        else:
+                            procesar_mensaje_con_gemini(tel, "Te envié una imagen pero hubo un error al cargarla. " + txt)
+                            
+                    # EJECUTAR DESCARGA Y ANÁLISIS EN SEGUNDO PLANO
+                    threading.Thread(target=procesar_imagen_bg, args=(telefono_cliente, texto_cliente, media_id)).start()
                 
             elif 'statuses' in cambios:
                 estado = cambios['statuses'][0]['status'] 
