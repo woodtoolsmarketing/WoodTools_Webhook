@@ -15,6 +15,7 @@ import re
 import io
 from PIL import Image
 import threading
+from threading import Lock
 
 app = Flask(__name__)
 
@@ -60,7 +61,7 @@ NOMBRE_HOJA = "Base de datos wt"
 RUTA_CREDENCIALES = "/etc/secrets/credenciales.json" if os.path.exists("/etc/secrets/credenciales.json") else "credenciales.json"
 
 # ==========================================
-# MAGIA ANTI-CHOQUES: POOL DE CONEXIONES A LA NUBE
+# MAGIA ANTI-CHOQUES Y SISTEMA DE COLAS (LOCKS)
 # ==========================================
 db_pool = None
 try:
@@ -69,6 +70,16 @@ try:
         print("✅ Pool de conexiones a PostgreSQL creado exitosamente.")
 except Exception as e:
     print(f"❌ Error al conectar a PostgreSQL: {e}")
+
+# Diccionario de candados (Locks) por número de teléfono para evitar que los mensajes se pisen la memoria
+chat_locks = {}
+locks_lock = Lock()
+
+def get_chat_lock(telefono):
+    with locks_lock:
+        if telefono not in chat_locks:
+            chat_locks[telefono] = Lock()
+        return chat_locks[telefono]
 
 def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=False, retries=1):
     if not db_pool:
@@ -173,7 +184,6 @@ def enviar_mensaje_whatsapp(telefono_destino, texto, link_boton=None):
         requests.post(url, headers=headers, json=data_fallback)
 
 def descargar_imagen_whatsapp(media_id):
-    """Descarga la imagen desde los servidores de Meta usando el Token"""
     try:
         url_meta = f"https://graph.facebook.com/v18.0/{media_id}"
         headers = {"Authorization": f"Bearer {CLOUD_API_TOKEN}"}
@@ -397,6 +407,7 @@ Utilizar un tono amigable, pero sin irte por otros lados y siempre mantenerse en
 Para brindar información no utilizar información de otras marcas que no sean WoodTools, Freud o Franzoi.
 No dar precios, en caso de que te pregunten sobre precios redirigirlos al chat de whatsapp.
 Tu labor además de informar es indagar por lo que tenes que ir preguntando de manera sutil: Qué herramienta necesita, qué materiales quiere cortar, en qué medida y cuál es la máquina que utiliza.
+A la hora de redirigir al chat que el mensaje del enlace contenga el nombre de la herramienta y sus medidas, la información recolectada en la indagación y cuantas unidades necesita.
 
 ⚠️ REGLA DE ORO DE CONFIDENCIALIDAD (CÓDIGOS INTERNOS) ⚠️
 Los códigos alfanuméricos de las herramientas (ej: LU3F-0200, LU5B 0300, LG3D 0600, FRS0054, CHC050420HSS, etc.) que verás a continuación son ESTRICTAMENTE DE USO INTERNO. 
@@ -558,13 +569,12 @@ REGLAS DE FORMATO Y BREVEDAD (¡CRÍTICO Y OBLIGATORIO!):
 3. RESPONDE DUDAS TÉCNICAS: Si el cliente hace una pregunta técnica directa (ej: "¿qué espesores se pueden unir?"), RESPÓNDELA obligatoriamente buscando en tu base de conocimiento antes de seguir avanzando con la venta.
 
 REGLAS DE INDAGACIÓN Y MEMORIA (¡ANTI-AMNESIA Y EMBUDO ESTRICTO!):
-1. SALUDO ÚNICO Y PREGUNTA DE ASESOR: Revisa tu historial. Si ya saludaste o ya preguntaste por el asesor, TIENES PROHIBIDO volver a hacerlo.
-2. FIDELIDAD DE HERRAMIENTA (ANTI-ALUCINACIÓN): Si ya identificaste la herramienta (ej. "Ensamble Cónico") y el cliente elige una medida (ej. "160mm"), ¡MANTÉN EL NOMBRE DE LA HERRAMIENTA ORIGINAL! NO la cambies por otra del catálogo solo porque coincide la medida.
-3. CARRITO DE COMPRAS (MÚLTIPLES FOTOS): Si el cliente manda una NUEVA foto y pide otra herramienta, NO OLVIDES la anterior. Sigue acumulando las herramientas (ej: "Ya anoté la de Ensamble, ahora para esta nueva foto necesitas...") y suma ambas al link final.
-4. EMBUDO HACIA ADELANTE: Si ya identificaste la herramienta por foto, ESTÁ ESTRICTAMENTE PROHIBIDO volver a preguntar si busca recta, moldura o cepillado.
-5. SECUENCIA PARA FRESAS: Herramienta -> Medidas de la HERRAMIENTA -> Máquina -> Cantidad. 
-6. RESPONDER "CUALES HAY" (MOSTRAR MEDIDAS): Si preguntan "¿cuáles hay?", busca la herramienta actual en tu conocimiento y muéstrale claramente las medidas disponibles (Diámetro D y Ancho B).
-7. REGLA DE FUEGO (ESPESOR): ¡TIENES ESTRICTAMENTE PROHIBIDO PREGUNTAR POR EL ESPESOR DE LA MADERA EN FRESAS! Jamás uses la palabra "espesor".
+1. SALUDO ÚNICO: Revisa tu historial. Si ya saludaste o preguntaste por el asesor, TIENES PROHIBIDO volver a hacerlo.
+2. FIDELIDAD ABSOLUTA DE HERRAMIENTA (ANTI-ALUCINACIÓN): Si ya identificaste la herramienta recomendada en el historial (ej. "Fresa Multimoldura"), ¡NO LA CAMBIES! Mantenla fija. Si el cliente elige la medida "160mm" o "180mm" o dice la máquina "Tupí", no cambies la herramienta a Encastre o Finger, simplemente anota la medida/máquina a la herramienta que ya habías recomendado.
+3. EMBUDO HACIA ADELANTE: Si ya identificaste la herramienta, ESTÁ ESTRICTAMENTE PROHIBIDO volver a preguntar si busca recta, moldura o cepillado.
+4. SECUENCIA PARA FRESAS: Herramienta -> Medidas de la HERRAMIENTA -> Máquina -> Cantidad. 
+5. RESPONDER "CUALES HAY" (MOSTRAR MEDIDAS): Si preguntan "¿cuáles hay?", busca la herramienta actual en tu conocimiento y muéstrale claramente los Diámetros (D) y Anchos de Corte (B) disponibles.
+6. REGLA DE FUEGO (ESPESOR): ¡TIENES ESTRICTAMENTE PROHIBIDO PREGUNTAR POR EL ESPESOR DE LA MADERA EN FRESAS! Jamás uses la palabra "espesor".
 
 REGLA DE PRECIOS Y MATEMÁTICA:
 1. MATEMÁTICA Y UNIDADES: Toma ÚNICAMENTE el valor del último mensaje del cliente. Prohibido sumar o juntar números de mensajes anteriores.
@@ -583,157 +593,163 @@ https://woodtools-webhook.onrender.com/wa/{tanda_id}/{tel_10_digitos}/[TELEFONO_
 """
 
 def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=None):
-    # Comando de Reset Ultra Flexible
-    if texto_entrante and "reset" in texto_entrante.strip().lower():
-        tel_10 = extraer_10_digitos(telefono_cliente)
-        res_hist = execute_db_query("SELECT historial FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), fetchone=True)
-        if res_hist:
-            historial_obj = json.loads(res_hist[0])
-            historial_limpio = historial_obj[2:] if len(historial_obj) >= 2 else historial_obj
-            execute_db_query("""
-                INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
-            """, (telefono_cliente, "Cerrado por Reset", json.dumps(historial_limpio), datetime.now()), commit=True)
-            
-        execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), commit=True)
-        execute_db_query("DELETE FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), commit=True)
-        enviar_mensaje_whatsapp(telefono_cliente, "✅ *Memoria y carrito borrados exitosamente.*\nEl historial quedó registrado y tu número está limpio.\n\nEscribime un 'Hola' para empezar desde cero.")
-        return
-
-    resultado = execute_db_query("SELECT historial, ultima_interaccion FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), fetchone=True)
-    tel_10 = extraer_10_digitos(telefono_cliente)
-    
-    if resultado:
-        historial_str = resultado[0]
-        ultima_interaccion = resultado[1]
-        if ultima_interaccion and datetime.now() - ultima_interaccion > timedelta(hours=1):
-            res_vend = execute_db_query("SELECT numero_vendedor FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), fetchone=True)
-            vendedor_asignado = res_vend[0] if res_vend else "Sin asignar"
-            
-            historial_obj = json.loads(historial_str)
-            historial_limpio = historial_obj[2:] if len(historial_obj) >= 2 else historial_obj
-            
-            execute_db_query("""
-                INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
-            """, (telefono_cliente, vendedor_asignado, json.dumps(historial_limpio), datetime.now()), commit=True)
-            
+    lock = get_chat_lock(telefono_cliente)
+    with lock:
+        # Comando de Reset Ultra Flexible
+        if texto_entrante and "reset" in texto_entrante.strip().lower():
+            tel_10 = extraer_10_digitos(telefono_cliente)
+            res_hist = execute_db_query("SELECT historial FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), fetchone=True)
+            if res_hist:
+                historial_obj = json.loads(res_hist[0])
+                historial_limpio = historial_obj[2:] if len(historial_obj) >= 2 else historial_obj
+                execute_db_query("""
+                    INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
+                """, (telefono_cliente, "Cerrado por Reset", json.dumps(historial_limpio), datetime.now()), commit=True)
+                
             execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), commit=True)
             execute_db_query("DELETE FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), commit=True)
-            resultado = None  
+            enviar_mensaje_whatsapp(telefono_cliente, "✅ *Memoria y carrito borrados exitosamente.*\nEl historial quedó registrado y tu número está limpio.\n\nEscribime un 'Hola' para empezar desde cero.")
+            return
+    
+        resultado = execute_db_query("SELECT historial, ultima_interaccion FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), fetchone=True)
+        tel_10 = extraer_10_digitos(telefono_cliente)
+        
+        if resultado:
+            historial_str = resultado[0]
+            ultima_interaccion = resultado[1]
+            if ultima_interaccion and datetime.now() - ultima_interaccion > timedelta(hours=1):
+                res_vend = execute_db_query("SELECT numero_vendedor FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), fetchone=True)
+                vendedor_asignado = res_vend[0] if res_vend else "Sin asignar"
+                
+                historial_obj = json.loads(historial_str)
+                historial_limpio = historial_obj[2:] if len(historial_obj) >= 2 else historial_obj
+                
+                execute_db_query("""
+                    INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
+                """, (telefono_cliente, vendedor_asignado, json.dumps(historial_limpio), datetime.now()), commit=True)
+                
+                execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), commit=True)
+                execute_db_query("DELETE FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), commit=True)
+                resultado = None  
+                
+        res_tanda = execute_db_query("SELECT tanda_id FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), fetchone=True)
+        tanda_id_actual = res_tanda[0] if (res_tanda and res_tanda[0]) else "ORGANICO"
+        
+        if not resultado and tanda_id_actual == "ORGANICO":
+            execute_db_query("UPDATE metricas_campanas SET respondidos = respondidos + 1 WHERE tanda_id = 'ORGANICO'", commit=True)
+        
+        prompt_dinamico = obtener_prompt_personalizado(telefono_cliente)
+        
+        if resultado:
+            historial = json.loads(resultado[0])
+            if len(historial) > 0 and historial[0]["role"] == "user":
+                historial[0]["parts"] = [prompt_dinamico]
+        else:
+            historial = [
+                {"role": "user", "parts": [prompt_dinamico]},
+                {"role": "model", "parts": ["Entendido. Guardaré en memoria el carrito, seré breve, no repetiré saludos, preguntaré si quiere algo más antes de derivar, y no preguntaré el espesor de la madera."]}
+            ]
             
-    res_tanda = execute_db_query("SELECT tanda_id FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), fetchone=True)
-    tanda_id_actual = res_tanda[0] if (res_tanda and res_tanda[0]) else "ORGANICO"
-    
-    if not resultado and tanda_id_actual == "ORGANICO":
-        execute_db_query("UPDATE metricas_campanas SET respondidos = respondidos + 1 WHERE tanda_id = 'ORGANICO'", commit=True)
-    
-    prompt_dinamico = obtener_prompt_personalizado(telefono_cliente)
-    
-    if resultado:
-        historial = json.loads(resultado[0])
-        if len(historial) > 0 and historial[0]["role"] == "user":
-            historial[0]["parts"] = [prompt_dinamico]
-    else:
-        historial = [
-            {"role": "user", "parts": [prompt_dinamico]},
-            {"role": "model", "parts": ["Entendido. Guardaré en memoria el carrito, seré breve, no repetiré saludos, preguntaré si quiere algo más antes de derivar, y no preguntaré el espesor de la madera."]}
-        ]
-        
-    texto_para_historial = texto_entrante if texto_entrante else "[El usuario envió una imagen para analizar]"
-    
-    try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        chat = model.start_chat(history=historial[:-1])
-        
-        # PROCESAMIENTO DE VISIÓN (Si mandó imagen)
+        # Marcador visual definitivo para evitar alucinaciones
         if imagen_pil:
-            param_vision = """INSTRUCCIÓN VISUAL ESTRICTA Y EXPERTA (Oculta al cliente):
-Eres un experto analizando herramientas y cortes de carpintería. El cliente ha enviado una imagen.
-Primero, determina inmediatamente si la foto muestra una HERRAMIENTA (metal, pintura roja) o un CORTE DE MADERA (un trozo de madera con el borde trabajado).
-
-=== REGLA EXCLUSIVA PARA FOTOS DE MADERA (MUESTRAS DE CORTE) ===
-Si la imagen es un trozo de madera mostrando su perfil:
-1. ¿Tiene forma de dientes o peine para unir (ensamblar) maderas?
-   - Si los dientes terminan en PUNTAS CHATAS O PLANAS (rectángulos/trapecios): Es "Fresa para Ensamble Cónico HM".
-   - Si los dientes terminan en PUNTAS MUY AFILADAS (en forma de "V" estricta o zig-zag): Es "Fresa para Finger HM".
-2. ¿Tiene una ranura recta/canal profundo justo en el medio del canto? -> Es para "Moldura de Puertas y Ventanas" o "Machimbre".
-3. ¿Es una forma decorativa compleja en el borde que combina curvas, lomas, picos agudos o escalones, sin canales en el medio? -> ES LA "FRESA MULTIMOLDURA". La Multimoldura es el comodín de la carpintería.
-
-=== REGLA EXCLUSIVA PARA FOTOS DE HERRAMIENTAS (METAL/ROJO) ===
-PASO 1: ¿Rodillo muy ancho con 40-100 plaquitas cuadradas? -> "Cabezal Cepillador HM".
-PASO 2: ¿Abertura estructural? 
-  - Hoja de sierra en el medio de dos fresas rojas -> "Moldura de Puertas y Ventanas HM".
-  - Macho saliente masivo en el centro -> "Contramoldura".
-  - Disco inmenso plano con filos súper largos horizontales -> "Replán de Tablero HM".
-PASO 3: ¿Moldura o Multimoldura?
-  - Fresa de UNA SOLA PIEZA con filos excepcionalmente altos (ej. 45mm) en forma de "S" súper exagerada con picos y curvas continuas -> "FRESA MULTIMOLDURA".
-  - Línea recta diagonal a 45° que termina en curva -> "Frente Inglés HM".
-  - Panza redonda maciza hacia afuera (media esfera) -> "Rinconera Simple HM".
-  - Juego de DOS fresas asimétricas de curvas suaves -> "Zócalo Simple y Contramarco HM".
-
-PASO 4: ACCIÓN OBLIGATORIA DE RESPUESTA
-1. Identifica el producto usando la lógica correcta (Madera vs Herramienta).
-2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto.
-3. NUNCA menciones códigos alfanuméricos internos.
-4. Continúa tu embudo preguntando SOLO los datos que te falten para cotizar: Diámetro/Ancho de la HERRAMIENTA (leyendo tus opciones del catálogo), Máquina que utiliza, o Cantidad. 
-5. REGLA DE FUEGO: TIENES ESTRICTAMENTE PROHIBIDO usar la palabra "espesor de madera" o preguntarle al cliente por el espesor de la madera.
-"""
-            contenido = [param_vision, imagen_pil]
-            if texto_entrante:
-                contenido.append(texto_entrante)
-            respuesta = chat.send_message(contenido)
+            texto_para_historial = f"[Imagen de muestra recibida y analizada] {texto_entrante}".strip()
         else:
-            respuesta = chat.send_message(texto_entrante)
+            texto_para_historial = texto_entrante
         
-        texto_respuesta = respuesta.text
-        texto_limpio = texto_respuesta
-        link_extraido = None
-        
-        # Extraer enlace robusto ignorando la puntuación final
-        match = re.search(r'(https://woodtools-webhook\.onrender\.com/wa/[^\s<>]+)', texto_respuesta)
-        if match:
-            link_extraido = match.group(1).rstrip('.",\'')
-            texto_limpio = texto_respuesta.replace(link_extraido, "").strip()
-            texto_limpio = texto_limpio.replace("👉", "").replace("Hacé clic en este enlace para hablar con él", "").strip()
-        
-        historial.append({"role": "user", "parts": [texto_para_historial]})
-        
-        if link_extraido or "Te voy a derivar con" in texto_respuesta:
-            vendedor_asignado = "Orgánico / Asignado por IA" if tanda_id_actual == "ORGANICO" else "Vendedor de Campaña"
+        try:
+            model = genai.GenerativeModel('gemini-2.5-flash')
+            chat = model.start_chat(history=historial[:-1])
             
-            historial.append({"role": "model", "parts": [texto_respuesta]})
-            historial_limpio = historial[2:] if len(historial) >= 2 else historial
+            # PROCESAMIENTO DE VISIÓN (Si mandó imagen)
+            if imagen_pil:
+                param_vision = """INSTRUCCIÓN VISUAL ESTRICTA Y EXPERTA (Oculta al cliente):
+    Eres un experto analizando herramientas y cortes de carpintería. El cliente ha enviado una imagen.
+    Primero, determina inmediatamente si la foto muestra una HERRAMIENTA (metal, pintura roja) o un CORTE DE MADERA (un trozo de madera con el borde trabajado).
+    
+    === REGLA EXCLUSIVA PARA FOTOS DE MADERA (MUESTRAS DE CORTE) ===
+    Si la imagen es un trozo de madera mostrando su perfil:
+    1. ¿Tiene forma de dientes o peine para unir (ensamblar) maderas?
+       - Si los dientes terminan en PUNTAS CHATAS O PLANAS (rectángulos/trapecios): Es "Fresa para Ensamble Cónico HM".
+       - Si los dientes terminan en PUNTAS MUY AFILADAS (en forma de "V" estricta o zig-zag): Es "Fresa para Finger HM".
+    2. ¿Tiene una ranura recta/canal profundo justo en el medio del canto? -> Es para "Moldura de Puertas y Ventanas" o "Machimbre".
+    3. ¿Es una forma decorativa compleja en el borde que combina curvas, lomas, picos agudos o escalones, sin canales en el medio? -> ES LA "FRESA MULTIMOLDURA". La Multimoldura es el comodín de la carpintería.
+    
+    === REGLA EXCLUSIVA PARA FOTOS DE HERRAMIENTAS (METAL/ROJO) ===
+    PASO 1: ¿Rodillo muy ancho con 40-100 plaquitas cuadradas? -> "Cabezal Cepillador HM".
+    PASO 2: ¿Abertura estructural? 
+      - Hoja de sierra en el medio de dos fresas rojas -> "Moldura de Puertas y Ventanas HM".
+      - Macho saliente masivo en el centro -> "Contramoldura".
+      - Disco inmenso plano con filos súper largos horizontales -> "Replán de Tablero HM".
+    PASO 3: ¿Moldura o Multimoldura?
+      - Fresa de UNA SOLA PIEZA con filos excepcionalmente altos (ej. 45mm) en forma de "S" súper exagerada con picos y curvas continuas -> "FRESA MULTIMOLDURA".
+      - Línea recta diagonal a 45° que termina en curva -> "Frente Inglés HM".
+      - Panza redonda maciza hacia afuera (media esfera) -> "Rinconera Simple HM".
+      - Juego de DOS fresas asimétricas de curvas suaves -> "Zócalo Simple y Contramarco HM".
+    
+    PASO 4: ACCIÓN OBLIGATORIA DE RESPUESTA
+    1. Identifica el producto usando la lógica correcta (Madera vs Herramienta).
+    2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto.
+    3. NUNCA menciones códigos alfanuméricos internos.
+    4. Continúa tu embudo preguntando SOLO los datos que te falten para cotizar: Diámetro/Ancho de la HERRAMIENTA (leyendo tus opciones del catálogo), Máquina que utiliza, o Cantidad. 
+    5. REGLA DE FUEGO: TIENES ESTRICTAMENTE PROHIBIDO usar la palabra "espesor de madera" o preguntarle al cliente por el espesor de la madera.
+    """
+                contenido = [param_vision, imagen_pil]
+                if texto_entrante:
+                    contenido.append(texto_entrante)
+                respuesta = chat.send_message(contenido)
+            else:
+                respuesta = chat.send_message(texto_entrante)
             
-            execute_db_query("""
-                INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
-            """, (telefono_cliente, vendedor_asignado, json.dumps(historial_limpio), datetime.now()), commit=True)
+            texto_respuesta = respuesta.text
+            texto_limpio = texto_respuesta
+            link_extraido = None
             
-            execute_db_query("""
-                INSERT INTO chat_sesiones (telefono, historial, ultima_interaccion, advertido) 
-                VALUES (%s, %s, %s, 0) 
-                ON CONFLICT (telefono) 
-                DO UPDATE SET historial = EXCLUDED.historial, ultima_interaccion = EXCLUDED.ultima_interaccion, advertido = 0
-            """, (telefono_cliente, json.dumps(historial), datetime.now()), commit=True)
+            # Extraer enlace robusto ignorando la puntuación final
+            match = re.search(r'(https://woodtools-webhook\.onrender\.com/wa/[^\s<>]+)', texto_respuesta)
+            if match:
+                link_extraido = match.group(1).rstrip('.",\'')
+                texto_limpio = texto_respuesta.replace(link_extraido, "").strip()
+                texto_limpio = texto_limpio.replace("👉", "").replace("Hacé clic en este enlace para hablar con él", "").strip()
             
-        else:
-            historial.append({"role": "model", "parts": [texto_respuesta]})
-            execute_db_query("""
-                INSERT INTO chat_sesiones (telefono, historial, ultima_interaccion, advertido) 
-                VALUES (%s, %s, %s, 0) 
-                ON CONFLICT (telefono) 
-                DO UPDATE SET historial = EXCLUDED.historial, ultima_interaccion = EXCLUDED.ultima_interaccion, advertido = 0
-            """, (telefono_cliente, json.dumps(historial), datetime.now()), commit=True)
+            historial.append({"role": "user", "parts": [texto_para_historial]})
             
-        enviar_mensaje_whatsapp(telefono_cliente, texto_limpio, link_boton=link_extraido)
-        
-    except Exception as e:
-        print(f"Error con Gemini: {e}")
-        enviar_mensaje_whatsapp(telefono_cliente, f"🤖 Dame un momento, estoy armando tu carrito...")
+            if link_extraido or "Te voy a derivar con" in texto_respuesta:
+                vendedor_asignado = "Orgánico / Asignado por IA" if tanda_id_actual == "ORGANICO" else "Vendedor de Campaña"
+                
+                historial.append({"role": "model", "parts": [texto_respuesta]})
+                historial_limpio = historial[2:] if len(historial) >= 2 else historial
+                
+                execute_db_query("""
+                    INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
+                """, (telefono_cliente, vendedor_asignado, json.dumps(historial_limpio), datetime.now()), commit=True)
+                
+                execute_db_query("""
+                    INSERT INTO chat_sesiones (telefono, historial, ultima_interaccion, advertido) 
+                    VALUES (%s, %s, %s, 0) 
+                    ON CONFLICT (telefono) 
+                    DO UPDATE SET historial = EXCLUDED.historial, ultima_interaccion = EXCLUDED.ultima_interaccion, advertido = 0
+                """, (telefono_cliente, json.dumps(historial), datetime.now()), commit=True)
+                
+            else:
+                historial.append({"role": "model", "parts": [texto_respuesta]})
+                execute_db_query("""
+                    INSERT INTO chat_sesiones (telefono, historial, ultima_interaccion, advertido) 
+                    VALUES (%s, %s, %s, 0) 
+                    ON CONFLICT (telefono) 
+                    DO UPDATE SET historial = EXCLUDED.historial, ultima_interaccion = EXCLUDED.ultima_interaccion, advertido = 0
+                """, (telefono_cliente, json.dumps(historial), datetime.now()), commit=True)
+                
+            enviar_mensaje_whatsapp(telefono_cliente, texto_limpio, link_boton=link_extraido)
+            
+        except Exception as e:
+            print(f"Error con Gemini: {e}")
+            enviar_mensaje_whatsapp(telefono_cliente, f"🤖 Dame un momento, estoy armando tu carrito...")
 
 # ==========================================
 # RUTAS DEL WEBHOOK Y NUEVOS ENDPOINTS
