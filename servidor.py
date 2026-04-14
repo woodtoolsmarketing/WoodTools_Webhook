@@ -644,32 +644,32 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
         # PROCESAMIENTO DE VISIÓN (Si mandó imagen)
         if imagen_pil:
             param_vision = """INSTRUCCIÓN VISUAL ESTRICTA Y EXPERTA (Oculta al cliente):
-Eres un experto analizando herramientas de carpintería. El cliente ha enviado una imagen. Debes analizar detenidamente la foto usando este PROTOCOLO DE EXCLUSIÓN VISUAL ESTRICTO y en este orden exacto:
+Eres un experto analizando herramientas y cortes de carpintería. El cliente ha enviado una imagen.
+Primero, determina inmediatamente si la foto muestra una HERRAMIENTA (metal, pintura roja) o un CORTE DE MADERA (un trozo de madera con el borde trabajado).
 
-PASO 1: ¿ES CEPILLADO? (Descarte por densidad de dientes)
-Mira el cuerpo de la herramienta. ¿Es un rodillo/cilindro muy ancho y masivo lleno de muchísimas plaquitas pequeñas y cuadradas de metal duro (entre 40 y 100 dientes) distribuidas por toda la superficie? 
--> SÍ: Es un "Cabezal Cepillador HM". (Sirve para aplanar, no hace decoración). DETENTE AQUÍ.
--> NO: Pasa al Paso 2.
+=== REGLA EXCLUSIVA PARA FOTOS DE MADERA (MUESTRAS DE CORTE) ===
+Si la imagen es un trozo de madera mostrando su perfil:
+1. ¿Es un ensamble de picos muy afilados en estricto zig-zag ("V" repetitiva) en la testa? -> Es "Fresa para Finger HM".
+2. ¿Tiene una ranura recta/canal profundo justo en el medio del canto? -> Es para "Moldura de Puertas y Ventanas" o "Machimbre".
+3. ¿Es una forma decorativa compleja en el borde que combina curvas, lomas, picos agudos o escalones, sin canales en el medio? -> ES LA "FRESA MULTIMOLDURA". La Multimoldura es el comodín de la carpintería. Si ves un perfil de madera complejo (como un zócalo asimétrico, un pecho paloma, o cortes con picos interiores), asume que es la Multimoldura.
 
-PASO 2: ¿ES ABERTURA? (Descarte por función estructural - Puertas/Ventanas)
-Las aberturas no son solo decorativas, tienen que sostener vidrios o paneles, o encastrarse entre sí. Busca estos rasgos críticos en el centro del filo:
-- ¿Ves una fina hoja de sierra circular metálica (disco con dientes) "sangucheada" justo en el MEDIO de dos fresas rojas curvas? -> Es "Moldura de Puertas y Ventanas HM" (esa sierra hace el canal para el vidrio).
-- ¿Ves un macho cuadrado/recto masivo y saliente justo en el MEDIO de dos caídas curvas? -> Es "Contramoldura".
-- ¿Es un disco rojo plano, muy ancho (ej. 200mm) con filos exageradamente largos en horizontal para rebajar la CARA de la madera, dejando un escalón larguísimo? -> Es "Replán de Tablero HM".
-Si cumple alguna de estas, es Abertura. DETENTE AQUÍ.
-
-PASO 3: ¿ES MOLDURA GENERAL? (Zócalos, Rinconeras, Frente Inglés)
-Si llegaste aquí, la herramienta tiene perfiles curvos, cóncavos o convexos, pero NO tiene ranuras para vidrios, NO tiene espigas de encastre centrales y NO es un rodillo lleno de dientes. Es puramente decorativa para un borde.
-- Si el filo es una línea recta inclinada (diagonal a 45°) que termina en una pequeña curva: "Frente Inglés HM".
-- Si es una panza redonda y masiva hacia afuera (forma de media esfera): "Rinconera Simple HM".
-- Si es una sucesión ondulada (como una ola o pecho paloma) sin ranuras centrales: "Zócalo Simple y Contramarco HM".
+=== REGLA EXCLUSIVA PARA FOTOS DE HERRAMIENTAS (METAL/ROJO) ===
+PASO 1: ¿Rodillo muy ancho con 40-100 plaquitas cuadradas? -> "Cabezal Cepillador HM".
+PASO 2: ¿Abertura estructural? 
+  - Hoja de sierra en el medio de dos fresas rojas -> "Moldura de Puertas y Ventanas HM".
+  - Macho saliente masivo en el centro -> "Contramoldura".
+  - Disco inmenso plano con filos súper largos horizontales -> "Replán de Tablero HM".
+PASO 3: ¿Moldura o Multimoldura?
+  - Fresa de UNA SOLA PIEZA con filos excepcionalmente altos (ej. 45mm) en forma de "S" súper exagerada con picos y curvas continuas -> "FRESA MULTIMOLDURA".
+  - Línea recta diagonal a 45° que termina en curva -> "Frente Inglés HM".
+  - Panza redonda maciza hacia afuera (media esfera) -> "Rinconera Simple HM".
+  - Juego de DOS fresas asimétricas de curvas suaves -> "Zócalo Simple y Contramarco HM".
 
 PASO 4: ACCIÓN OBLIGATORIA DE RESPUESTA
-1. Identifica la herramienta usando EXCLUSIVAMENTE la lógica de arriba.
-2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto (Ej: "¡Claro! Por la cantidad de dientes y el formato que veo en la foto, lo que necesitas es un [Nombre de la Herramienta]").
-3. NUNCA menciones códigos alfanuméricos internos en el texto.
-4. NUNCA le preguntes qué perfil busca (¡ya lo identificaste!).
-5. Continúa tu embudo preguntando SOLO los datos que te falten para cotizar: Espesor de la madera, Máquina que utiliza, o Cantidad de unidades.
+1. Identifica el producto usando la lógica correcta (Madera vs Herramienta).
+2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto. (Ej: "¡Claro! Por el perfil que veo en esa muestra de madera, lo que necesitas es una Fresa Multimoldura, que te permite hacer esa y muchas otras formas").
+3. NUNCA menciones códigos alfanuméricos internos.
+4. Continúa tu embudo preguntando SOLO los datos que te falten: Espesor, Máquina o Cantidades.
 """
             contenido = [param_vision, imagen_pil]
             if texto_entrante:
