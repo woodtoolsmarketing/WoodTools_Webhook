@@ -644,26 +644,32 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
         # PROCESAMIENTO DE VISIÓN (Si mandó imagen)
         if imagen_pil:
             param_vision = """INSTRUCCIÓN VISUAL ESTRICTA Y EXPERTA (Oculta al cliente):
-Eres un experto analizando herramientas de carpintería. El cliente ha enviado una imagen. Debes analizar detenidamente la foto (si es la herramienta física o un corte en madera) y usar este PROTOCOLO DE DESEMPATE VISUAL estricto para no confundir perfiles similares:
+Eres un experto analizando herramientas de carpintería. El cliente ha enviado una imagen. Debes analizar detenidamente la foto usando este PROTOCOLO DE EXCLUSIÓN VISUAL ESTRICTO y en este orden exacto:
 
-REGLA DE DESEMPATE 1: MOLDURAS VS ZÓCALOS VS ABERTURAS (¡EL ERROR MÁS COMÚN!)
-Si ves una madera con un perfil decorativo curvo (tipo pecho paloma o lomas):
-- ¿Tiene una RANURA PROFUNDA y estrecha en el medio del canto (para un vidrio/tablero)? -> Es "Moldura de Puertas y Ventanas" o "Moldura Simple". ¡NO es Zócalo!
-- ¿Tiene una ESPIGA / MACHO RECTO que sobresale en el medio del canto o un rebaje pronunciado para esa espiga? -> Es "Contramoldura". ¡NO es Zócalo!
-- ¿Es un rebaje muy ANCHO y extenso sobre la CARA PLANA de la madera, afinando el borde para encastrar? -> Es "Replán de Tablero" o la función replán de la "Moldura Simple". ¡NO es Zócalo!
-- ¿Es una caída recta en diagonal a 45° que luego termina en una curvita? -> Es "Frente Inglés".
-- ¿Es un relieve ondulado continuo en un borde, SIN ranuras al medio, SIN espigas al medio, que se usa contra la pared o piso? -> SOLO ENTONCES es "Zócalo Simple y Contramarco HM".
+PASO 1: ¿ES CEPILLADO? (Descarte por densidad de dientes)
+Mira el cuerpo de la herramienta. ¿Es un rodillo/cilindro muy ancho y masivo lleno de muchísimas plaquitas pequeñas y cuadradas de metal duro (entre 40 y 100 dientes) distribuidas por toda la superficie? 
+-> SÍ: Es un "Cabezal Cepillador HM". (Sirve para aplanar, no hace decoración). DETENTE AQUÍ.
+-> NO: Pasa al Paso 2.
 
-REGLA DE DESEMPATE 2: ENSAMBLES FINGER VS CÓNICO
-- Dientes puntiagudos en forma de "V" afilada (zig-zag puro) -> "Fresa para Finger HM".
-- Dientes con puntas CHATAS, PLANAS o CUADRADAS (trapecios) -> "Fresa para Ensamble Cónico HM".
+PASO 2: ¿ES ABERTURA? (Descarte por función estructural - Puertas/Ventanas)
+Las aberturas no son solo decorativas, tienen que sostener vidrios o paneles, o encastrarse entre sí. Busca estos rasgos críticos en el centro del filo:
+- ¿Ves una fina hoja de sierra circular metálica (disco con dientes) "sangucheada" justo en el MEDIO de dos fresas rojas curvas? -> Es "Moldura de Puertas y Ventanas HM" (esa sierra hace el canal para el vidrio).
+- ¿Ves un macho cuadrado/recto masivo y saliente justo en el MEDIO de dos caídas curvas? -> Es "Contramoldura".
+- ¿Es un disco rojo plano, muy ancho (ej. 200mm) con filos exageradamente largos en horizontal para rebajar la CARA de la madera, dejando un escalón larguísimo? -> Es "Replán de Tablero HM".
+Si cumple alguna de estas, es Abertura. DETENTE AQUÍ.
 
-PASO 1: ACCIÓN OBLIGATORIA DE RESPUESTA
-1. Identifica la herramienta usando las REGLAS DE DESEMPATE cruzando los datos visuales con la variable CATALOGO_IA_ESTATICO que tienes en tu prompt principal.
-2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto (Ej: "¡Claro! Por el perfil que me mostrás en la foto, lo que necesitas es una [Nombre de la Fresa]").
-3. NUNCA menciones códigos internos en el texto.
-4. NUNCA le preguntes qué perfil busca (¡ya lo viste en la foto!).
-5. Continúa tu embudo preguntando SOLO los datos que te falten para cotizar: Espesor de la madera (si aplica), Máquina que utiliza (tupí, moldurera, etc.) o Cantidad de unidades.
+PASO 3: ¿ES MOLDURA GENERAL? (Zócalos, Rinconeras, Frente Inglés)
+Si llegaste aquí, la herramienta tiene perfiles curvos, cóncavos o convexos, pero NO tiene ranuras para vidrios, NO tiene espigas de encastre centrales y NO es un rodillo lleno de dientes. Es puramente decorativa para un borde.
+- Si el filo es una línea recta inclinada (diagonal a 45°) que termina en una pequeña curva: "Frente Inglés HM".
+- Si es una panza redonda y masiva hacia afuera (forma de media esfera): "Rinconera Simple HM".
+- Si es una sucesión ondulada (como una ola o pecho paloma) sin ranuras centrales: "Zócalo Simple y Contramarco HM".
+
+PASO 4: ACCIÓN OBLIGATORIA DE RESPUESTA
+1. Identifica la herramienta usando EXCLUSIVAMENTE la lógica de arriba.
+2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto (Ej: "¡Claro! Por la cantidad de dientes y el formato que veo en la foto, lo que necesitas es un [Nombre de la Herramienta]").
+3. NUNCA menciones códigos alfanuméricos internos en el texto.
+4. NUNCA le preguntes qué perfil busca (¡ya lo identificaste!).
+5. Continúa tu embudo preguntando SOLO los datos que te falten para cotizar: Espesor de la madera, Máquina que utiliza, o Cantidad de unidades.
 """
             contenido = [param_vision, imagen_pil]
             if texto_entrante:
