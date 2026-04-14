@@ -73,8 +73,6 @@ except Exception as e:
 
 chat_locks = {}
 locks_lock = Lock()
-
-# Memoria para evitar mensajes duplicados de WhatsApp
 processed_msg_ids = set()
 
 def get_chat_lock(telefono):
@@ -169,7 +167,7 @@ def enviar_mensaje_whatsapp(telefono_destino, texto, link_boton=None):
                 "action": {
                     "name": "cta_url",
                     "parameters": {
-                        "display_text": "Enviar Carrito al Asesor",
+                        "display_text": "Hablar con asesor",
                         "url": link_boton
                     }
                 }
@@ -181,6 +179,7 @@ def enviar_mensaje_whatsapp(telefono_destino, texto, link_boton=None):
     res = requests.post(url, headers=headers, json=data)
     
     if res.status_code >= 400 and link_boton:
+        # Fallback si falla el botón
         texto_fallback = f"{texto}\n\n👉 {link_boton}"
         data_fallback = {"messaging_product": "whatsapp", "to": telefono_destino, "type": "text", "text": {"body": texto_fallback}}
         requests.post(url, headers=headers, json=data_fallback)
@@ -413,7 +412,12 @@ Tu labor además de informar es indagar por lo que tenes que ir preguntando de m
 ⚠️ REGLA DE ORO DE CONFIDENCIALIDAD (CÓDIGOS INTERNOS) ⚠️
 Los códigos alfanuméricos de las herramientas (ej: LU3F-0200, LU5B 0300, LG3D 0600, FRS0054, CHC050420HSS, etc.) que verás a continuación son ESTRICTAMENTE DE USO INTERNO. 
 TIENES PROHIBIDO ABSOLUTAMENTE escribirlos en el chat conversacional con el cliente. Tampoco debes inyectarlos en el enlace de derivación.
-Para referirte a una herramienta en el chat o en el enlace, usa SOLO su nombre genérico, marca, diámetro exterior y cantidad de dientes (Ejemplo: "sierra Freud de 250mm e incisor de 125mm"). 
+Para referirte a una herramienta en el chat o en el enlace, usa SOLO su nombre genérico, marca, diámetro exterior y cantidad de dientes. 
+
+⚠️ REGLA CRÍTICA DE MARCAS (¡NUEVA!) ⚠️
+- Las SIERRAS CIRCULARES son marca Freud o Franzoi.
+- Las FRESAS, MECHAS y CUCHILLAS son de la línea WoodTools, marca Italiana o Franzoi.
+- ¡TIENES ESTRICTAMENTE PROHIBIDO decir que una Fresa es de marca Freud! NUNCA asocies la palabra "Freud" a una fresa (ni en el chat ni en el carrito).
 
 SIERRAS CIRCULARES
 A la hora de ofrecer las sierras circulares preguntar qué material cortan EXCEPTO si ya te piden "sierra con incisor".
@@ -454,7 +458,7 @@ Actúa como un asistente técnico especializado. Al brindar información sobre e
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2A 2500, cuenta con un diámetro exterior de 350 mm, un ancho de corte (espesor) de 3,5 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera, blanda y dura (a favor y en contra de la veta).
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo always como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2B 0700, cuenta con un diámetro exterior de 250 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera (modelo para madera blanda y dura en general).
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Franzoi, modelo SC4504248F, cuenta con un diámetro exterior de 450 mm, un ancho de corte (espesor) de 4,2 mm y un diámetro central de 30 mm; está fabricado en Metal duro y su uso es apto específicamente para superficies de Madera.
-Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2C 2000, cuenta con un diámetro exterior de 350 mm, un ancho de corte (espesor) de 3,5 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera.
+Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, LU2C 2000, cuenta con un diámetro exterior de 350 mm, un ancho de corte (espesor) de 3,5 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Franzoi, modelo SC60055244F, cuenta con un diámetro exterior de 600 mm, un ancho de corte (espesor) de 5,5 mm y un diámetro central de 30 mm; está fabricado en Metal duro y su uso es apto specifically para superficies de Madera (modelo para máquinas múltiples).
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2B 1900, cuenta con un diámetro exterior de 400 mm, un ancho de corte (espesor) de 4 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2C 1200, cuenta con un diámetro exterior de 250 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera.
@@ -481,7 +485,7 @@ Actúa como un asistente experto en herramientas de carpintería y utiliza la si
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Cabezales Cepilladores HM" y manteniendo los códigos "CB0500640", "CB0750660", "CB1000690", "CB13006100", "CB1601272", "CB1801280" y "CB22012100" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 125 mm y un Diámetro interior (d) de 40 mm en todas sus versiones; varían significativamente en su Ancho de corte (B) que va desde 55 mm hasta 220 mm, su número de dientes (Z) que oscila entre 40 y 100, y el ancho de corte del diente (b) que es de 6 mm para los modelos más angostos (hasta 130 mm de ancho) y de 12 mm para los modelos más anchos (desde 160 mm); se describen como cabezales cepilladores con cortantes en HM diseñados para cepillar o espigar, destacándose por su bajo nivel de ruido y menor consumo de energía.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresas en ángulo HM" y manteniendo el código "FA104/506" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) variable de 10 a 50 mm, un Diámetro interior (d) de 40 mm y está disponible con un número de dientes (Z) de 4 o 6; se describe como una fresa con cortantes en HM diseñada específicamente para efectuar ángulos.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresas 1/4 círculo cóncavo y convexo HM" y manteniendo los códigos "F04C014", "F04C016", "F04C054" y "F04C056" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 150 mm y un Diámetro interior (d) de 40 mm; están disponibles con un número de dientes (Z) de 4 o 6 y varían en su Ancho de corte (B) ofreciendo opciones de 1/2" a 3/4" y de 3/4" a 1 1/4"; se describen como fresas con cortantes en HM y ángulo axial diseñadas para efectuar trabajos de 1/4 de círculo cóncavo o convexo en formas A, B, C o D.
-Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresas 1/2 círculo cóncavo y convexo HM" y manteniendo los códigos "F2C014", "F2C054", "F2C104", "F2C154", "F2C204" y "F2C254" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 150 mm y un Diámetro interior (d) de 40 mm, están disponibles con un número de dientes (Z) de 4 o 6 y ofrecen diversas opciones de Ancho de corte (B) que incluyen 1/2", 5/8", 3/4", 1", 1 1/2" y 2"; se describen como fresas con cortantes en HM diseñadas específicamente para efectuar figuras de medio círculo cóncavo o convexo.
+Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresas 1/2 círculo cóncavo y convexo HM" y manteniendo los códigos "F2C014", "F2C054", "F2C104", "F2C154", "F2C204", "F2C254" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 150 mm y un Diámetro interior (d) de 40 mm, están disponibles con un número de dientes (Z) de 4 o 6 y ofrecen diversas opciones de Ancho de corte (B) que incluyen 1/2", 5/8", 3/4", 1", 1 1/2" y 2"; se describen como fresas con cortantes en HM diseñadas específicamente para efectuar figuras de medio círculo cóncavo o convexo.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Zócalo Simple y Contramarco HM" y manteniendo los códigos "FZS128" y "FZS129" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) de 1/2" a 3/4" y un Diámetro interior (d) de 40 mm, contando con un número de dientes (Z) de 4; el producto ofrece dos variantes funcionales: una configuración para efectuar zócalos que combina una fresa A y una fresa B (código FZS128), y una configuración para efectuar contramarcos que utiliza dos fresas A (código FZS129); se describen como herramientas con cortantes en HM diseñadas específicamente para la fabricación de estas molduras.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Rinconera Simple HM" y manteniendo el código "FR104/156" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) variable de 3/4" a 1 1/2", un Diámetro interior (d) de 40 mm y está disponible con un número de dientes (Z) de 4 o 6; se describe como una fresa con cortantes en HM diseñada específicamente para efectuar rinconera según los modelos 1 o 2.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Rinconera Doble HM" y manteniendo el código "JFRD" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 160 mm, un Ancho de corte (B) de 1" y un Diámetro interior (d) de 40 mm; cuenta con una configuración de dientes (Z) de 2x4 y 1x10, compuesta por fresas con 4 cortantes cada una y una sierra circular con 10 cortantes, todos en HM; está diseñada específicamente para efectuar rinconera doble según los modelos 1 o 2.
@@ -552,10 +556,11 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
         texto_contexto = f"""CONTEXTO DE LA CAMPAÑA: El cliente respondió a la campaña "{tipo_camp}". VENDEDOR ASIGNADO: {nombre_vendedor_ia} (Número: {tel_vend})."""
     else:
         nombre_vendedor_ia = "[Aún no elegido]"
-        tel_vend = "5491145394279" # Default fallback
+        tel_vend = "5491145394279" 
         texto_contexto = """CONTEXTO: Cliente "Orgánico". VENDEDOR ASIGNADO: Aún no elegido.
-        ¡REGLA OBLIGATORIA DE SALUDO!: Si es el primer mensaje y el vendedor aún no está elegido, debes saludar y PREGUNTAR OBLIGATORIAMENTE si prefiere hablar con Carlos, Valentín o Emmanuel.
-        Una vez que elija a uno (o si dice que le da igual), guárdalo en tu memoria silenciosamente, asume su número y no lo vuelvas a preguntar. Los números son: Carlos (5491165630406), Valentín (5491145394279), Emmanuel (5491157528428)."""
+        ¡REGLA OBLIGATORIA DE SALUDO!: Si es el primer mensaje, saluda y PREGUNTA OBLIGATORIAMENTE si prefiere hablar con Carlos, Valentín o Emmanuel.
+        ATENCIÓN: Si el cliente ignora esta pregunta y te hace una consulta directa (ej: "cotizame esto", "info de..."), ASUME SILENCIOSAMENTE a Valentín (5491145394279) y NO vuelvas a preguntar por el asesor.
+        Los números son: Carlos (5491165630406), Valentín (5491145394279), Emmanuel (5491157528428)."""
 
     return f"""
 {BASE_CONOCIMIENTO}
@@ -571,11 +576,13 @@ REGLAS DE FORMATO Y BREVEDAD (¡CRÍTICO Y OBLIGATORIO!):
 
 REGLAS DE INDAGACIÓN Y MEMORIA (¡ANTI-AMNESIA Y EMBUDO ESTRICTO!):
 1. SALUDO ÚNICO: Revisa tu historial. Si ya saludaste o preguntaste por el asesor, TIENES PROHIBIDO volver a hacerlo.
-2. FIDELIDAD ABSOLUTA DE HERRAMIENTA (ANTI-ALUCINACIÓN): Si ya identificaste la herramienta recomendada en el historial (ej. "Fresa Multimoldura"), ¡NO LA CAMBIES! Mantenla fija. Si el cliente elige la medida "160mm" o "180mm" o dice la máquina "Tupí", no cambies la herramienta a Encastre o Finger, simplemente anota la medida/máquina a la herramienta que ya habías recomendado.
-3. EMBUDO HACIA ADELANTE: Si ya identificaste la herramienta, ESTÁ ESTRICTAMENTE PROHIBIDO volver a preguntar si busca recta, moldura o cepillado.
-4. FLUIDEZ: Puedes preguntar por las Medidas, Máquina y Cantidad de manera ágil y fluida, sin ser tan robótico. 
-5. RESPONDER "CUALES HAY" (MOSTRAR MEDIDAS): Si preguntan "¿cuáles hay?", busca la herramienta actual en tu conocimiento y muéstrale claramente los Diámetros (D) y Anchos de Corte (B) disponibles.
-6. REGLA DE FUEGO (ESPESOR): ¡TIENES ESTRICTAMENTE PROHIBIDO PREGUNTAR POR EL ESPESOR DE LA MADERA EN FRESAS! Jamás uses la palabra "espesor".
+2. FLEXIBILIDAD ANTE CORRECCIONES (NUEVA REGLA CRÍTICA): Si le ofreces una herramienta (ej. "Moldura de puertas y ventanas") y el cliente TE CORRIGE EXPLÍCITAMENTE (ej. "No es eso", "Es para otra cosa", "Necesito un rebaje", "Eso es un marco"), ¡TIENES PERMITIDO CAMBIAR DE HERRAMIENTA! Adapta tu recomendación a la nueva información o descripción que te da el cliente (ej. ofrece Fresas Rectas o para Ranurar Regulables si pide un rebaje para marco). NO te aferres tercamente a tu primera opción si el cliente te dice que está mal.
+3. FIDELIDAD ABSOLUTA DE HERRAMIENTA (ANTI-ALUCINACIÓN): A menos que el cliente te corrija (ver regla 2), una vez que ambos acuerdan qué herramienta necesita, MANTENLA FIJA. Si te da una medida o máquina, simplemente anota ese dato a la herramienta acordada.
+4. EMBUDO HACIA ADELANTE: Si ya identificaste la herramienta, ESTÁ ESTRICTAMENTE PROHIBIDO volver a preguntar si busca recta, moldura o cepillado.
+5. FLUIDEZ: Puedes preguntar por las Medidas, Máquina y Cantidad de manera ágil y fluida, sin ser tan robótico. Puedes pedir las tres juntas.
+6. RESPONDER "CUALES HAY" (MOSTRAR MEDIDAS): Si preguntan "¿cuáles hay?", busca la herramienta actual en tu conocimiento y muéstrale claramente los Diámetros (D) y Anchos de Corte (B) disponibles.
+7. REGLA DE FUEGO (ESPESOR): ¡TIENES ESTRICTAMENTE PROHIBIDO PREGUNTAR POR EL ESPESOR DE LA MADERA EN FRESAS! Jamás uses la palabra "espesor".
+8. BOTÓN DE PÁNICO (DERIVACIÓN INMEDIATA): Si el cliente pide explícitamente hablar con un "humano", "vendedor", "persona" o "asesor", TIENES ESTRICTAMENTE PROHIBIDO hacerle más preguntas de venta. Genera INMEDIATAMENTE el enlace de derivación con la información que tengas hasta ese momento y despídete.
 
 REGLA DE PRECIOS Y MATEMÁTICA:
 1. MATEMÁTICA Y UNIDADES: Toma ÚNICAMENTE el valor del último mensaje del cliente. Prohibido sumar o juntar números de mensajes anteriores.
@@ -585,11 +592,11 @@ REGLA DEL CARRITO DE COMPRAS Y CIERRE (¡NUEVO Y OBLIGATORIO!):
 1. Cuando el cliente te diga la CANTIDAD de la herramienta, ¡NO ENVÍES EL ENLACE DE DERIVACIÓN TODAVÍA!
 2. Debes confirmar su pedido y PREGUNTAR OBLIGATORIAMENTE: "¿Te gustaría agregar alguna otra herramienta o cerramos la cotización?".
 3. Si el cliente quiere otra herramienta, repite el embudo acumulando todo en tu memoria.
-4. SOLO SI el cliente dice "no", "nada más", "eso es todo" o "cerramos", ENTONCES debes generar el enlace de derivación final agrupando TODO lo que pidió.
+4. SOLO SI el cliente dice "no", "nada mas", "eso es todo" o "ya estaria", ENTONCES debes generar el enlace de derivación final agrupando TODO lo que pidió.
 
 FORMATO ESTRICTO DEL ENLACE DE DERIVACIÓN:
-¡PROHIBIDO CORTAR EL ENLACE! Escríbelo completo de principio a fin, sin poner "..." al final. No uses acentos ni caracteres especiales en la URL, solo texto plano.
-El enlace debe contener todos los productos acumulados en forma de lista. DEBES reemplazar CADA ESPACIO en blanco dentro del enlace por "%20" y CADA SALTO DE LÍNEA por "%0A". La estructura debe ser LITERALMENTE esta (todo en una sola línea sin espacios reales):
+¡PROHIBIDO CORTAR EL ENLACE! Escríbelo completo de principio a fin, sin poner "..." al final. NO USES TILDES, ACENTOS NI LA LETRA "Ñ" DENTRO DE LA URL.
+El enlace debe contener todos los productos acumulados en forma de lista. La estructura debe ser LITERALMENTE esta (todo en una sola línea sin espacios reales):
 
 https://woodtools-webhook.onrender.com/wa/{tanda_id}/{tel_10_digitos}/[TELEFONO_DEL_ASESOR_ELEGIDO]?text=Hola,%20quiero%20cotizacion%20de:%0A-%20[producto1]%20[medida1]%20[cantidad1]%0A-%20[producto2]%20[medida2]%20[cantidad2]
 """
@@ -653,7 +660,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
         else:
             historial = [
                 {"role": "user", "parts": [prompt_dinamico]},
-                {"role": "model", "parts": ["Entendido. Guardaré en memoria el carrito, seré breve, no repetiré saludos, preguntaré si quiere algo más antes de derivar, y no preguntaré el espesor de la madera."]}
+                {"role": "model", "parts": ["Entendido. Guardaré en memoria el carrito, seré breve, no usaré tildes en la URL, preguntaré si quiere algo más, recordaré que las fresas NO son Freud y si el cliente me corrige, cambiaré mi sugerencia."]}
             ]
             
         # Marcador visual definitivo para evitar alucinaciones
@@ -693,11 +700,11 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
       - Juego de DOS fresas asimétricas de curvas suaves -> "Zócalo Simple y Contramarco HM".
     
     PASO 4: ACCIÓN OBLIGATORIA DE RESPUESTA
-    1. Identifica el producto usando la lógica correcta (Madera vs Herramienta).
-    2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto.
-    3. NUNCA menciones códigos alfanuméricos internos.
-    4. Continúa tu embudo preguntando SOLO los datos que te falten para cotizar: Diámetro/Ancho de la HERRAMIENTA (leyendo tus opciones del catálogo), Máquina que utiliza, o Cantidad. 
-    5. REGLA DE FUEGO: TIENES ESTRICTAMENTE PROHIBIDO usar la palabra "espesor de madera" o preguntarle al cliente por el espesor de la madera.
+    1. Identifica el producto usando la lógica correcta.
+    2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto. (Ej: "¡Claro! Por el perfil que veo, lo que necesitas es una Fresa Multimoldura").
+    3. NUNCA menciones códigos alfanuméricos internos. NUNCA digas que la fresa es marca Freud.
+    4. Continúa tu embudo preguntando SOLO los datos que te falten para cotizar: Diámetro/Ancho (leyendo tus opciones), Máquina que utiliza, o Cantidad. 
+    5. REGLA DE FUEGO: TIENES ESTRICTAMENTE PROHIBIDO usar la palabra "espesor de madera".
     """
                 contenido = [param_vision, imagen_pil]
                 if texto_entrante:
@@ -710,12 +717,18 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
             texto_limpio = texto_respuesta
             link_extraido = None
             
-            # Extraer enlace robusto ignorando la puntuación final
+            # Extraer enlace robusto y codificar SIN TILDES
             match = re.search(r'(https://woodtools-webhook\.onrender\.com/wa/[^\s<>]+)', texto_respuesta)
             if match:
-                link_extraido = match.group(1).rstrip('.",\'')
-                texto_limpio = texto_respuesta.replace(link_extraido, "").strip()
+                raw_url = match.group(1).rstrip('.",\'')
+                texto_limpio = texto_respuesta.replace(raw_url, "").strip()
                 texto_limpio = texto_limpio.replace("👉", "").replace("Hacé clic en este enlace para hablar con él", "").strip()
+                
+                # Quitar codificaciones previas erróneas, pasar a minúsculas sin acentos, y volver a codificar de forma segura
+                import unicodedata
+                url_limpia = urllib.parse.unquote(raw_url)
+                url_limpia = ''.join((c for c in unicodedata.normalize('NFD', url_limpia) if unicodedata.category(c) != 'Mn'))
+                link_extraido = urllib.parse.quote(url_limpia, safe=':/?&=%')
             
             historial.append({"role": "user", "parts": [texto_para_historial]})
             
@@ -758,7 +771,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (Versión Carrito de Compras) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (Versión Carrito de Compras Final) 🚀", 200
 
 @app.route('/wa/<tanda_id>/<telefono_cliente>/<vendedor>', methods=['GET'])
 def redirect_whatsapp(tanda_id, telefono_cliente, vendedor):
