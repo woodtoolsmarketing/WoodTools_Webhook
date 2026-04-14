@@ -61,7 +61,7 @@ NOMBRE_HOJA = "Base de datos wt"
 RUTA_CREDENCIALES = "/etc/secrets/credenciales.json" if os.path.exists("/etc/secrets/credenciales.json") else "credenciales.json"
 
 # ==========================================
-# MAGIA ANTI-CHOQUES Y SISTEMA DE COLAS (LOCKS)
+# MAGIA ANTI-CHOQUES Y SISTEMA DE COLAS
 # ==========================================
 db_pool = None
 try:
@@ -71,9 +71,11 @@ try:
 except Exception as e:
     print(f"❌ Error al conectar a PostgreSQL: {e}")
 
-# Diccionario de candados (Locks) por número de teléfono para evitar que los mensajes se pisen la memoria
 chat_locks = {}
 locks_lock = Lock()
+
+# Memoria para evitar mensajes duplicados de WhatsApp
+processed_msg_ids = set()
 
 def get_chat_lock(telefono):
     with locks_lock:
@@ -407,7 +409,6 @@ Utilizar un tono amigable, pero sin irte por otros lados y siempre mantenerse en
 Para brindar información no utilizar información de otras marcas que no sean WoodTools, Freud o Franzoi.
 No dar precios, en caso de que te pregunten sobre precios redirigirlos al chat de whatsapp.
 Tu labor además de informar es indagar por lo que tenes que ir preguntando de manera sutil: Qué herramienta necesita, qué materiales quiere cortar, en qué medida y cuál es la máquina que utiliza.
-A la hora de redirigir al chat que el mensaje del enlace contenga el nombre de la herramienta y sus medidas, la información recolectada en la indagación y cuantas unidades necesita.
 
 ⚠️ REGLA DE ORO DE CONFIDENCIALIDAD (CÓDIGOS INTERNOS) ⚠️
 Los códigos alfanuméricos de las herramientas (ej: LU3F-0200, LU5B 0300, LG3D 0600, FRS0054, CHC050420HSS, etc.) que verás a continuación son ESTRICTAMENTE DE USO INTERNO. 
@@ -572,7 +573,7 @@ REGLAS DE INDAGACIÓN Y MEMORIA (¡ANTI-AMNESIA Y EMBUDO ESTRICTO!):
 1. SALUDO ÚNICO: Revisa tu historial. Si ya saludaste o preguntaste por el asesor, TIENES PROHIBIDO volver a hacerlo.
 2. FIDELIDAD ABSOLUTA DE HERRAMIENTA (ANTI-ALUCINACIÓN): Si ya identificaste la herramienta recomendada en el historial (ej. "Fresa Multimoldura"), ¡NO LA CAMBIES! Mantenla fija. Si el cliente elige la medida "160mm" o "180mm" o dice la máquina "Tupí", no cambies la herramienta a Encastre o Finger, simplemente anota la medida/máquina a la herramienta que ya habías recomendado.
 3. EMBUDO HACIA ADELANTE: Si ya identificaste la herramienta, ESTÁ ESTRICTAMENTE PROHIBIDO volver a preguntar si busca recta, moldura o cepillado.
-4. SECUENCIA PARA FRESAS: Herramienta -> Medidas de la HERRAMIENTA -> Máquina -> Cantidad. 
+4. FLUIDEZ: Puedes preguntar por las Medidas, Máquina y Cantidad de manera ágil y fluida, sin ser tan robótico. 
 5. RESPONDER "CUALES HAY" (MOSTRAR MEDIDAS): Si preguntan "¿cuáles hay?", busca la herramienta actual en tu conocimiento y muéstrale claramente los Diámetros (D) y Anchos de Corte (B) disponibles.
 6. REGLA DE FUEGO (ESPESOR): ¡TIENES ESTRICTAMENTE PROHIBIDO PREGUNTAR POR EL ESPESOR DE LA MADERA EN FRESAS! Jamás uses la palabra "espesor".
 
@@ -587,9 +588,10 @@ REGLA DEL CARRITO DE COMPRAS Y CIERRE (¡NUEVO Y OBLIGATORIO!):
 4. SOLO SI el cliente dice "no", "nada más", "eso es todo" o "cerramos", ENTONCES debes generar el enlace de derivación final agrupando TODO lo que pidió.
 
 FORMATO ESTRICTO DEL ENLACE DE DERIVACIÓN:
+¡PROHIBIDO CORTAR EL ENLACE! Escríbelo completo de principio a fin, sin poner "..." al final. No uses acentos ni caracteres especiales en la URL, solo texto plano.
 El enlace debe contener todos los productos acumulados en forma de lista. DEBES reemplazar CADA ESPACIO en blanco dentro del enlace por "%20" y CADA SALTO DE LÍNEA por "%0A". La estructura debe ser LITERALMENTE esta (todo en una sola línea sin espacios reales):
 
-https://woodtools-webhook.onrender.com/wa/{tanda_id}/{tel_10_digitos}/[TELEFONO_DEL_ASESOR_ELEGIDO]?text=Hola,%20quiero%20cotización%20de:%0A-%20[producto1]%20[medida1]%20[cantidad1]%0A-%20[producto2]%20[medida2]%20[cantidad2]
+https://woodtools-webhook.onrender.com/wa/{tanda_id}/{tel_10_digitos}/[TELEFONO_DEL_ASESOR_ELEGIDO]?text=Hola,%20quiero%20cotizacion%20de:%0A-%20[producto1]%20[medida1]%20[cantidad1]%0A-%20[producto2]%20[medida2]%20[cantidad2]
 """
 
 def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=None):
@@ -858,6 +860,16 @@ def recibir_notificaciones():
             if 'messages' in cambios:
                 mensaje = cambios['messages'][0]
                 
+                # Deduplicación: Si ya procesamos este mensaje, respondemos OK y salimos
+                msg_id = mensaje.get('id')
+                if msg_id:
+                    if msg_id in processed_msg_ids:
+                        return jsonify({"status": "ok"}), 200
+                    processed_msg_ids.add(msg_id)
+                    # Limpiamos para que la RAM no se llene si llegan miles de mensajes
+                    if len(processed_msg_ids) > 1000:
+                        processed_msg_ids.clear()
+
                 # REVISAR SI EL MENSAJE ES TEXTO O IMAGEN
                 if mensaje['type'] == 'text': 
                     telefono_cliente = limpiar_numero(mensaje['from'])
@@ -865,7 +877,7 @@ def recibir_notificaciones():
                     print(f"📩 MENSAJE de {telefono_cliente}: {texto_cliente}", flush=True)
                     registrar_metrica('responded', telefono_cliente) 
                     
-                    # PROCESAR EN SEGUNDO PLANO PARA EVITAR MENSAJES DOBLES DE WHATSAPP
+                    # PROCESAR EN SEGUNDO PLANO PARA EVITAR DEMORAS EN EL WEBHOOK
                     threading.Thread(target=procesar_mensaje_con_gemini, args=(telefono_cliente, texto_cliente)).start()
                 
                 elif mensaje['type'] == 'image':
