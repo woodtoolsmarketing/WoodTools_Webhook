@@ -81,6 +81,10 @@ def get_chat_lock(telefono):
             chat_locks[telefono] = Lock()
         return chat_locks[telefono]
 
+def hora_arg():
+    """Devuelve la hora actual en Argentina (UTC-3) para corregir el desfase del servidor"""
+    return datetime.utcnow() - timedelta(hours=3)
+
 def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=False, retries=1):
     if not db_pool:
         print("❌ No hay pool de conexiones disponible.")
@@ -179,7 +183,6 @@ def enviar_mensaje_whatsapp(telefono_destino, texto, link_boton=None):
     res = requests.post(url, headers=headers, json=data)
     
     if res.status_code >= 400 and link_boton:
-        # Fallback si falla el botón
         texto_fallback = f"{texto}\n\n👉 {link_boton}"
         data_fallback = {"messaging_product": "whatsapp", "to": telefono_destino, "type": "text", "text": {"body": texto_fallback}}
         requests.post(url, headers=headers, json=data_fallback)
@@ -243,7 +246,7 @@ def bloquear_numero_en_sheets(telefono):
 # ==========================================
 def revisar_rutinas_de_tiempo():
     try:
-        ahora = datetime.now()
+        ahora = hora_arg()
         
         hace_48_horas = ahora - timedelta(hours=48)
         para_borrar = execute_db_query("SELECT id, telefono FROM mensajes WHERE estado='sent' AND fecha < %s", (hace_48_horas,), fetchall=True)
@@ -272,7 +275,7 @@ def revisar_rutinas_de_tiempo():
                         INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
                         VALUES (%s, %s, %s, %s)
                         ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
-                    """, (telefono, vendedor_asignado, json.dumps(historial_limpio), datetime.now()), commit=True)
+                    """, (telefono, vendedor_asignado, json.dumps(historial_limpio), hora_arg()), commit=True)
 
                     ultimo_msg_cliente = "Sin mensajes recientes."
                     for msg in reversed(historial_limpio):
@@ -414,10 +417,10 @@ Los códigos alfanuméricos de las herramientas (ej: LU3F-0200, LU5B 0300, LG3D 
 TIENES PROHIBIDO ABSOLUTAMENTE escribirlos en el chat conversacional con el cliente. Tampoco debes inyectarlos en el enlace de derivación.
 Para referirte a una herramienta en el chat o en el enlace, usa SOLO su nombre genérico, marca, diámetro exterior y cantidad de dientes. 
 
-⚠️ REGLA CRÍTICA DE MARCAS ⚠️
+⚠️ REGLA CRÍTICA DE MARCAS (¡NUEVA Y ESTRICTA!) ⚠️
 - Las SIERRAS CIRCULARES son marca Freud o Franzoi.
 - Las FRESAS, MECHAS y CUCHILLAS son de la línea WoodTools, marca Italiana o Franzoi.
-- ¡TIENES ESTRICTAMENTE PROHIBIDO decir que una Fresa es de marca Freud! NUNCA asocies la palabra "Freud" a una fresa (ni en el chat ni en el carrito).
+- ¡TIENES ESTRICTAMENTE PROHIBIDO decir que una Fresa es de marca Freud! NUNCA asocies la palabra "Freud" a una fresa, ni siquiera si el cliente lo dice. Si ofreces una Fresa, di "Fresa [Nombre] de WoodTools".
 
 SIERRAS CIRCULARES
 A la hora de ofrecer las sierras circulares preguntar qué material cortan EXCEPTO si ya te piden "sierra con incisor".
@@ -584,6 +587,10 @@ REGLAS DE INDAGACIÓN Y MEMORIA (¡ANTI-AMNESIA Y EMBUDO ESTRICTO!):
 7. REGLA DE FUEGO (ESPESOR): ¡TIENES ESTRICTAMENTE PROHIBIDO PREGUNTAR POR EL ESPESOR DE LA MADERA EN FRESAS! Jamás uses la palabra "espesor".
 8. BOTÓN DE PÁNICO (DERIVACIÓN INMEDIATA): Si el cliente pide hablar con un "humano", "vendedor", "persona" o "asesor", ESTÁ PROHIBIDO hacerle más preguntas de venta. Genera INMEDIATAMENTE el enlace de derivación con la información que tengas.
 
+REGLA DE PRECIOS Y MATEMÁTICA:
+1. MATEMÁTICA ESTRICTA: Si el cliente te dice la cantidad "1", significa UNA (1) unidad. ¡NUNCA concatenes números agregándole un "1" adelante transformándolo en "11"! Toma el número crudo y literal del último mensaje. Prohibido sumar o concatenar cantidades.
+2. Si preguntan precio sin darte todos los datos, diles: "Los precios te los pasa el asesor. Para armar el presupuesto, contame [tu siguiente pregunta]".
+
 REGLA DEL CARRITO DE COMPRAS Y CIERRE (¡NUEVO Y OBLIGATORIO!):
 1. Cuando el cliente te diga la CANTIDAD de la herramienta, ¡NO ENVÍES EL ENLACE DE DERIVACIÓN TODAVÍA!
 2. Debes confirmar su pedido y PREGUNTAR OBLIGATORIAMENTE: "¿Te gustaría agregar alguna otra herramienta o cerramos la cotización?".
@@ -591,7 +598,7 @@ REGLA DEL CARRITO DE COMPRAS Y CIERRE (¡NUEVO Y OBLIGATORIO!):
 4. CIERRE DIRECTO: Si el cliente indica de cualquier forma que NO quiere más herramientas (ej: "con eso ya estaría", "cerramos", "nada más", "solo eso", "no", "ya estaria"), TIENES ESTRICTAMENTE PROHIBIDO volver a preguntarle si quiere algo más. Genera EL ENLACE DE DERIVACIÓN INMEDIATAMENTE.
 
 FORMATO ESTRICTO DEL ENLACE DE DERIVACIÓN:
-¡PROHIBIDO CORTAR EL ENLACE! Escríbelo completo de principio a fin, sin poner "..." al final. NO USES TILDES, ACENTOS NI LA LETRA "Ñ" DENTRO DE LA URL. IMPRIME SOLO LA URL CRUDA (sin formato Markdown de texto azul).
+¡PROHIBIDO CORTAR EL ENLACE! Escríbelo completo de principio a fin, sin poner "..." al final. NO USES TILDES, ACENTOS NI LA LETRA "Ñ" DENTRO DE LA URL. IMPRIME SOLO LA URL CRUDA.
 El enlace debe contener todos los productos acumulados en forma de lista. La estructura debe ser LITERALMENTE esta (todo en una sola línea sin espacios reales):
 
 https://woodtools-webhook.onrender.com/wa/{tanda_id}/{tel_10_digitos}/[TELEFONO_DEL_ASESOR_ELEGIDO]?text=Hola,%20quiero%20cotizacion%20de:%0A-%20[producto1]%20[medida1]%20[cantidad1]%0A-%20[producto2]%20[medida2]%20[cantidad2]
@@ -610,7 +617,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
                     INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
                     VALUES (%s, %s, %s, %s)
                     ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
-                """, (telefono_cliente, "Cerrado por Reset", json.dumps(historial_limpio), datetime.now()), commit=True)
+                """, (telefono_cliente, "Cerrado por Reset", json.dumps(historial_limpio), hora_arg()), commit=True)
                 
             execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), commit=True)
             execute_db_query("DELETE FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), commit=True)
@@ -623,7 +630,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
         if resultado:
             historial_str = resultado[0]
             ultima_interaccion = resultado[1]
-            if ultima_interaccion and datetime.now() - ultima_interaccion > timedelta(hours=1):
+            if ultima_interaccion and hora_arg() - ultima_interaccion > timedelta(hours=1):
                 res_vend = execute_db_query("SELECT numero_vendedor FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), fetchone=True)
                 vendedor_asignado = res_vend[0] if res_vend else "Sin asignar"
                 
@@ -634,7 +641,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
                     INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
                     VALUES (%s, %s, %s, %s)
                     ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
-                """, (telefono_cliente, vendedor_asignado, json.dumps(historial_limpio), datetime.now()), commit=True)
+                """, (telefono_cliente, vendedor_asignado, json.dumps(historial_limpio), hora_arg()), commit=True)
                 
                 execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), commit=True)
                 execute_db_query("DELETE FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), commit=True)
@@ -655,7 +662,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
         else:
             historial = [
                 {"role": "user", "parts": [prompt_dinamico]},
-                {"role": "model", "parts": ["Entendido. Guardaré en memoria el carrito, seré breve, no usaré tildes en la URL, entenderé sinónimos para cerrar la venta, no pediré confirmaciones de datos redundantes, y recordaré que las fresas NO son Freud."]}
+                {"role": "model", "parts": ["Entendido. Guardaré en memoria el carrito, seré breve, no usaré tildes en la URL, entenderé sinónimos para cerrar la venta, no pediré confirmaciones de datos redundantes, y recordaré que las fresas NO son Freud y que no concatenaré cantidades si me dice '1'."]}
             ]
             
         if imagen_pil:
@@ -733,14 +740,14 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
                     INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
                     VALUES (%s, %s, %s, %s)
                     ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
-                """, (telefono_cliente, vendedor_asignado, json.dumps(historial_limpio), datetime.now()), commit=True)
+                """, (telefono_cliente, vendedor_asignado, json.dumps(historial_limpio), hora_arg()), commit=True)
                 
                 execute_db_query("""
                     INSERT INTO chat_sesiones (telefono, historial, ultima_interaccion, advertido) 
                     VALUES (%s, %s, %s, 0) 
                     ON CONFLICT (telefono) 
                     DO UPDATE SET historial = EXCLUDED.historial, ultima_interaccion = EXCLUDED.ultima_interaccion, advertido = 0
-                """, (telefono_cliente, json.dumps(historial), datetime.now()), commit=True)
+                """, (telefono_cliente, json.dumps(historial), hora_arg()), commit=True)
                 
             else:
                 historial.append({"role": "model", "parts": [texto_respuesta]})
@@ -749,7 +756,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
                     VALUES (%s, %s, %s, 0) 
                     ON CONFLICT (telefono) 
                     DO UPDATE SET historial = EXCLUDED.historial, ultima_interaccion = EXCLUDED.ultima_interaccion, advertido = 0
-                """, (telefono_cliente, json.dumps(historial), datetime.now()), commit=True)
+                """, (telefono_cliente, json.dumps(historial), hora_arg()), commit=True)
                 
             enviar_mensaje_whatsapp(telefono_cliente, texto_limpio, link_boton=link_extraido)
             
@@ -834,7 +841,7 @@ def asignar_vendedor():
             VALUES (%s, %s, %s, %s, %s, %s) 
             ON CONFLICT (telefono_cliente) 
             DO UPDATE SET numero_vendedor=EXCLUDED.numero_vendedor, tipo_campana=EXCLUDED.tipo_campana, subtipo=EXCLUDED.subtipo, tanda_id=EXCLUDED.tanda_id, fecha_asignacion=EXCLUDED.fecha_asignacion
-        """, (telefono_cliente_10, numero_vendedor, tipo_campana, subtipo, tanda_id, datetime.now()), commit=True)
+        """, (telefono_cliente_10, numero_vendedor, tipo_campana, subtipo, tanda_id, hora_arg()), commit=True)
         
         if tanda_id:
             execute_db_query("""
@@ -870,6 +877,7 @@ def recibir_notificaciones():
                     if msg_id in processed_msg_ids:
                         return jsonify({"status": "ok"}), 200
                     processed_msg_ids.add(msg_id)
+                    # Limpiamos para que la RAM no se llene si llegan miles de mensajes
                     if len(processed_msg_ids) > 1000:
                         processed_msg_ids.clear()
 
@@ -880,6 +888,7 @@ def recibir_notificaciones():
                     print(f"📩 MENSAJE de {telefono_cliente}: {texto_cliente}", flush=True)
                     registrar_metrica('responded', telefono_cliente) 
                     
+                    # PROCESAR EN SEGUNDO PLANO PARA EVITAR DEMORAS EN EL WEBHOOK
                     threading.Thread(target=procesar_mensaje_con_gemini, args=(telefono_cliente, texto_cliente)).start()
                 
                 elif mensaje['type'] == 'image':
@@ -890,6 +899,7 @@ def recibir_notificaciones():
                     print(f"📸 IMAGEN de {telefono_cliente} - Descargando para análisis...", flush=True)
                     registrar_metrica('responded', telefono_cliente)
                     
+                    # FUNCION EN SEGUNDO PLANO PARA IMAGENES
                     def procesar_imagen_bg(tel, txt, m_id):
                         img_pil = descargar_imagen_whatsapp(m_id)
                         if img_pil:
@@ -911,7 +921,7 @@ def recibir_notificaciones():
                         INSERT INTO mensajes (id, telefono, estado, fecha) 
                         VALUES (%s, %s, %s, %s) 
                         ON CONFLICT (id) DO UPDATE SET estado=EXCLUDED.estado, fecha=EXCLUDED.fecha
-                    """, (msg_id, telefono, estado, datetime.now()), commit=True)
+                    """, (msg_id, telefono, estado, hora_arg()), commit=True)
                 elif estado in ['delivered', 'read']:
                     execute_db_query("DELETE FROM mensajes WHERE id=%s", (msg_id,), commit=True)
                 elif estado == 'failed':
