@@ -23,7 +23,7 @@ import unicodedata
 app = Flask(__name__)
 
 # ==========================================
-# CONFIGURACIÓN SEGURA
+# CONFIGURACIÓN SEGURA (Inteligente)
 # ==========================================
 posibles_rutas = [
     "/etc/secrets/tokens.json",
@@ -53,7 +53,7 @@ try:
     DATABASE_URL = credenciales_api.get("DATABASE_URL", os.environ.get("DATABASE_URL", ""))
     
     if not DATABASE_URL:
-        print("❌ ERROR FATAL: No se detectó la DATABASE_URL.")
+        print("❌ ERROR FATAL: No se detectó la DATABASE_URL de Neon. Revisa tu archivo json en Render.")
         
 except Exception as e:
     print(f"⚠️ ATENCIÓN: Error procesando credenciales: {e}")
@@ -85,6 +85,7 @@ def get_chat_lock(telefono):
         return chat_locks[telefono]
 
 def hora_arg():
+    """Devuelve la hora actual en Argentina (UTC-3)"""
     return datetime.utcnow() - timedelta(hours=3)
 
 def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=False, retries=1):
@@ -130,6 +131,9 @@ def init_db():
         execute_db_query('''CREATE TABLE IF NOT EXISTS tracking_metricas (tanda_id TEXT, telefono TEXT, evento TEXT, PRIMARY KEY(tanda_id, telefono, evento))''', commit=True)
         execute_db_query('''CREATE TABLE IF NOT EXISTS chats_derivados (telefono TEXT PRIMARY KEY, vendedor TEXT, historial TEXT, fecha TIMESTAMP)''', commit=True)
         
+        # Nueva tabla para configuración del bot (Inteligente vs Básico)
+        execute_db_query('''CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor TEXT)''', commit=True)
+        
         try: execute_db_query("ALTER TABLE chat_sesiones ADD COLUMN advertido INTEGER DEFAULT 0", commit=True)
         except Exception: pass 
         
@@ -141,11 +145,58 @@ def init_db():
         
         try: execute_db_query("INSERT INTO metricas_campanas (tanda_id, entregados, leidos, respondidos, derivados) VALUES ('ORGANICO', 0, 0, 0, 0) ON CONFLICT (tanda_id) DO NOTHING", commit=True)
         except Exception: pass
+        
+        try: execute_db_query("INSERT INTO configuracion (parametro, valor) VALUES ('modo_bot', 'AUTO') ON CONFLICT (parametro) DO NOTHING", commit=True)
+        except Exception: pass
             
     except Exception as e:
         print(f"Error crítico iniciando tablas: {e}")
 
 init_db()
+
+# ==========================================
+# CEREBRO: DETERMINAR MODO DE BOT
+# ==========================================
+def determinar_modo_bot():
+    """Define si el bot es Básico (Recepcionista) o Inteligente (Asesor) según la configuración o la hora"""
+    # 1. Leer la configuración forzada desde la base de datos
+    res = execute_db_query("SELECT valor FROM configuracion WHERE parametro = 'modo_bot'", fetchone=True)
+    conf = res[0] if res else 'AUTO'
+    
+    if conf == 'ON':
+        return "INTELIGENTE"
+    elif conf == 'OFF':
+        return "BASICO"
+        
+    # 2. Si está en AUTO, definir por horario
+    ahora = hora_arg()
+    if ahora.weekday() <= 4 and 8 <= ahora.hour < 17:
+        return "BASICO"
+    else:
+        return "INTELIGENTE"
+
+# ==========================================
+# ENDPOINTS PARA EL PROGRAMA DE ESCRITORIO
+# ==========================================
+@app.route('/estado_bot', methods=['GET'])
+def obtener_estado_bot():
+    """Devuelve la configuración actual y el modo resultante"""
+    res = execute_db_query("SELECT valor FROM configuracion WHERE parametro = 'modo_bot'", fetchone=True)
+    conf = res[0] if res else 'AUTO'
+    modo_actual = determinar_modo_bot()
+    return jsonify({"configuracion": conf, "modo_actual": modo_actual}), 200
+
+@app.route('/estado_bot', methods=['POST'])
+def configurar_estado_bot():
+    """Permite cambiar la configuración del bot ('AUTO', 'ON', 'OFF')"""
+    data = request.json
+    nuevo_estado = data.get('configuracion', 'AUTO')
+    
+    if nuevo_estado in ['AUTO', 'ON', 'OFF']:
+        execute_db_query("UPDATE configuracion SET valor = %s WHERE parametro = 'modo_bot'", (nuevo_estado,), commit=True)
+        return jsonify({"status": "ok", "configuracion": nuevo_estado}), 200
+        
+    return jsonify({"error": "Estado inválido. Debe ser AUTO, ON, u OFF."}), 400
 
 # ==========================================
 # FUNCIONES BÁSICAS Y DE ENVÍO
@@ -537,7 +588,6 @@ Actúa como un asistente experto en herramientas de carpintería y utiliza la si
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresa para Radios Múltiples HM" y manteniendo el código "FMR04" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 140 mm, un Ancho de corte (B) de 35 mm y un Diámetro interior (d) de 40 mm, contando con un número de dientes (Z) de 4; se describe como una fresa con 4 cortantes en HM diseñada específicamente para realizar multi-radios de 4 a 10 mm.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresa Multimoldura" y manteniendo el código "FP402" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) de 45 mm y un Diámetro interior (d) de 40 mm, contando con un número de dientes (Z) de 2; se describe como una fresa diseñada para realizar distintos tipos de molduras sin necesidad de cambiar los insertos, permitiendo al usuario obtain infinidad de molduras distintas simplemente subiendo o bajando el eje del tupí.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresa para Finger HS" y manteniendo el código "FG46S CB2" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 160 mm, un Ancho de corte (B) de 28,6 mm y un Diámetro interior (d) de 50 mm, contando con una configuración de dientes (Z) de 3+3; se describe como una fresa diseñada para unir madera, normalmente de cabeza, destacándose por permitir alcanzar altas velocidades de trabajo.
-Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'fresa para plegado' y básate estrictamente en los siguientes datos técnicos: es una Fresa para Plegado de Melamina, cuenta con un diámetro exterior de aprox. 45 mm, un vástago de 12 mm, un largo útil (LU) de aprox. 29 mm y un radio de 30 mm; cuenta con 2 filos de Metal duro. Su uso es exclusivo para placa de melamina de 18 mm. Ideal para utilizar en Pantógrafos y CNC. Dato extra: se recomienda el uso de pistola de calor para facilitar el plegado y se cuenta con video instructivo. No tiene garantía.
 
 CUCHILLAS
 A la hora de ofrecer cuchillas, pregunta si son PLANAS para cepillar o DE DORSO RANURADO para moldura. 
@@ -550,7 +600,7 @@ ENVÍOS Y AFILADOS
 - Afilados: Si el cliente pregunta si hacemos servicio de afilado, indícale que SÍ los realizamos, que la demora estimada es de entre 2 y 5 días. La logística aplica igual que en los envíos.
 """
 
-def obtener_prompt_personalizado(telefono_cliente_completo):
+def obtener_prompt_personalizado(telefono_cliente_completo, modo_bot):
     tel_10_digitos = extraer_10_digitos(telefono_cliente_completo)
     res = execute_db_query("SELECT numero_vendedor, tipo_campana, subtipo, tanda_id FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10_digitos,), fetchone=True)
 
@@ -582,6 +632,55 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
         ATENCIÓN: Si el cliente ignora esta pregunta y te hace una consulta directa (ej: "cotizame esto", "info de..."), ASUME SILENCIOSAMENTE a Valentín (5491145394279) y NO vuelvas a preguntar por el asesor.
         Los números son: Carlos (5491165630406), Valentín (5491145394279), Emmanuel (5491157528428)."""
 
+    if modo_bot == "BASICO":
+        reglas_modo = """
+ESTÁS EN MODO: BÁSICO (Horario Comercial).
+Tu rol es ser un recepcionista ágil. TU OBJETIVO PRINCIPAL ES DERIVAR AL VENDEDOR RÁPIDO.
+
+REGLAS DE MODO BÁSICO:
+1. Tus respuestas deben ser EXTREMADAMENTE CORTAS (1 o 2 renglones máximo).
+2. NO des información técnica, NO ofrezcas medidas específicas como si fueras catálogo, NO des características.
+3. Haz preguntas de indagación MUY simples: "¿Qué herramienta buscas?", "¿Para qué máquina?" o "¿Qué material vas a cortar?".
+4. En cuanto el cliente te diga qué herramienta quiere y para qué máquina, GENERA EL ENLACE DE DERIVACIÓN. No ofrezcas "carrito de compras" ni preguntes si quiere otra cosa.
+5. SALUDO ÚNICO: Revisa tu historial. Si ya saludaste o preguntaste por el asesor, NO lo repitas.
+6. BOTÓN DE PÁNICO: Si el cliente dice "humano", "vendedor", "persona", "asesor" o pide "precio", genera el enlace inmediatamente.
+
+FORMATO ESTRICTO DEL ENLACE DE DERIVACIÓN (SÓLO IMPRIME LA URL CRUDA, SIN PUNTOS SUSPENSIVOS):
+https://woodtools-webhook.onrender.com/wa/{tanda_id}/{tel_10_digitos}/[TELEFONO_DEL_ASESOR_ELEGIDO]?text=Hola,%20necesito%20info%20de:%0A-%20[Herramienta]%20para%20[Maquina]
+"""
+    else:
+        reglas_modo = """
+ESTÁS EN MODO: INTELIGENTE (Fuera de horario).
+Tu rol es ser un asesor experto y armar un carrito de compras completo.
+
+REGLAS DE FORMATO Y BREVEDAD:
+1. Tus respuestas deben ser MUY CORTAS y naturales. Máximo 2 a 3 renglones.
+2. PROHIBIDO DAR FICHAS TÉCNICAS completas a menos que pregunten. Di SOLO el nombre de la herramienta y la medida principal.
+3. RESPONDE DUDAS TÉCNICAS buscando en tu base de conocimiento antes de seguir avanzando.
+
+REGLAS DE INDAGACIÓN Y MEMORIA:
+1. SALUDO ÚNICO: Revisa tu historial. Si ya saludaste o preguntaste por el asesor, TIENES PROHIBIDO volver a hacerlo.
+2. FLEXIBILIDAD: Si el cliente TE CORRIGE EXPLÍCITAMENTE, ¡TIENES PERMITIDO CAMBIAR DE HERRAMIENTA!
+3. FIDELIDAD: A menos que te corrija, mantén fija la herramienta acordada.
+4. FLUIDEZ: Haz las preguntas PASO A PASO. ¡PROHIBIDO pedir confirmaciones redundantes! Si te da un dato, acéptalo en silencio y avanza.
+5. RESPONDER "CUALES HAY": Muestra claramente los Diámetros (D) y Anchos de Corte (B) disponibles.
+6. REGLA DE FUEGO (ESPESOR): ¡ESTRICTAMENTE PROHIBIDO PREGUNTAR POR EL ESPESOR DE LA MADERA EN FRESAS!
+7. BOTÓN DE PÁNICO: Si el cliente pide "humano", "vendedor", o "asesor", genera el enlace INMEDIATAMENTE.
+
+REGLA DE PRECIOS Y MATEMÁTICA:
+1. MATEMÁTICA ESTRICTA: Toma el número crudo y literal del último mensaje. Prohibido sumar o concatenar cantidades.
+2. PRECIOS: Diles que el asesor se los pasará por WhatsApp al final, NO CIERRES EL CARRITO si faltan datos.
+
+REGLA DEL CARRITO DE COMPRAS Y CIERRE:
+1. Cuando tengas la CANTIDAD, ¡NO ENVÍES EL ENLACE TODAVÍA! Pregunta: "¿Te gustaría agregar alguna otra herramienta o cerramos la cotización?".
+2. Si quiere otra herramienta, repite el embudo y acumula en tu memoria.
+3. CIERRE DIRECTO: Si el cliente indica que NO quiere más herramientas (ej: "con eso ya estaría", "nada más", "cerramos"), GENERA EL ENLACE INMEDIATAMENTE.
+
+FORMATO ESTRICTO DEL ENLACE DE DERIVACIÓN (SÓLO IMPRIME LA URL CRUDA):
+¡PROHIBIDO CORTAR EL ENLACE! Escríbelo completo de principio a fin. NO USES TILDES NI ACENTOS EN LA URL.
+https://woodtools-webhook.onrender.com/wa/{tanda_id}/{tel_10_digitos}/[TELEFONO_DEL_ASESOR_ELEGIDO]?text=Hola,%20quiero%20cotizacion%20de:%0A-%20[producto1]%20[medida1]%20[cantidad1]%0A-%20[producto2]%20[medida2]%20[cantidad2]
+"""
+
     return f"""
 {BASE_CONOCIMIENTO}
 
@@ -589,37 +688,7 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
 
 {texto_contexto}
 
-REGLAS DE FORMATO Y BREVEDAD (¡CRÍTICO Y OBLIGATORIO!):
-1. Tus respuestas deben ser MUY CORTAS y naturales. Máximo 2 a 3 renglones.
-2. PROHIBIDO DAR FICHAS TÉCNICAS completas a menos que el cliente pregunte. Di SOLO el nombre de la herramienta y la medida principal.
-3. RESPONDE DUDAS TÉCNICAS: Si el cliente hace una pregunta técnica directa, RESPÓNDELA obligatoriamente buscando en tu base de conocimiento antes de seguir avanzando.
-
-REGLAS DE INDAGACIÓN Y MEMORIA (¡ANTI-AMNESIA Y EMBUDO ESTRICTO!):
-1. SALUDO ÚNICO: Revisa tu historial. Si ya saludaste o preguntaste por el asesor, TIENES PROHIBIDO volver a hacerlo.
-2. FLEXIBILIDAD ANTE CORRECCIONES: Si le ofreces una herramienta y el cliente TE CORRIGE EXPLÍCITAMENTE (ej. "No es eso", "Necesito un rebaje", "Eso es un marco"), ¡TIENES PERMITIDO CAMBIAR DE HERRAMIENTA! Adapta tu recomendación a la nueva información. NO te aferres tercamente a tu primera opción.
-3. FIDELIDAD ABSOLUTA DE HERRAMIENTA: A menos que el cliente te corrija, una vez que acuerdan qué herramienta necesita, MANTENLA FIJA. Si te da una medida o máquina, anota ese dato a la herramienta acordada.
-4. EMBUDO HACIA ADELANTE: Si ya identificaste la herramienta, ESTÁ ESTRICTAMENTE PROHIBIDO volver a preguntar si busca recta, moldura o cepillado.
-5. FLUIDEZ Y AVANCE RÁPIDO: Haz las preguntas PASO A PASO. Si el cliente te da un dato (ej: "la de 245mm"), ¡NO LE PIDAS QUE LO CONFIRME! Acéptalo en silencio y avanza a la siguiente pregunta (Máquina o Cantidad). ¡PROHIBIDO pedir confirmaciones redundantes!
-6. RESPONDER "CUALES HAY": Si preguntan "¿cuáles hay?", busca la herramienta actual en tu conocimiento y muéstrale claramente los Diámetros (D) y Anchos de Corte (B) disponibles.
-7. REGLA DE FUEGO (ESPESOR): ¡TIENES ESTRICTAMENTE PROHIBIDO PREGUNTAR POR EL ESPESOR DE LA MADERA EN FRESAS! Jamás uses la palabra "espesor".
-8. BOTÓN DE PÁNICO (DERIVACIÓN INMEDIATA): Si el cliente pide hablar con un "humano", "vendedor", "persona" o "asesor", ESTÁ PROHIBIDO hacerle más preguntas de venta. Genera INMEDIATAMENTE el enlace de derivación con la información que tengas.
-
-REGLA DE PRECIOS Y MATEMÁTICA:
-1. MATEMÁTICA ESTRICTA: Si el cliente te dice la cantidad "1", significa UNA (1) unidad. ¡NUNCA concatenes números agregándole un "1" adelante transformándolo en "11"! Toma el número crudo y literal del último mensaje. Prohibido sumar o concatenar cantidades.
-2. Si preguntan precio sin darte todos los datos, diles: "Los precios te los pasa el asesor. Para armar el presupuesto, contame [tu siguiente pregunta]".
-
-REGLA DEL CARRITO DE COMPRAS Y CIERRE (¡NUEVO Y OBLIGATORIO!):
-1. Cuando el cliente te diga la CANTIDAD de la herramienta, ¡NO ENVÍES EL ENLACE DE DERIVACIÓN TODAVÍA!
-2. Debes confirmar su pedido y PREGUNTAR OBLIGATORIAMENTE: "¿Te gustaría agregar alguna otra herramienta o cerramos la cotización?".
-3. Si el cliente quiere otra herramienta, repite el embudo acumulando todo en tu memoria.
-4. CIERRE DIRECTO: Si el cliente indica que NO quiere más herramientas (ej: "con eso ya estaría", "cerramos", "nada más", "solo eso", "no", "ya estaria"), TIENES ESTRICTAMENTE PROHIBIDO volver a preguntarle si quiere algo más. Genera EL ENLACE DE DERIVACIÓN INMEDIATAMENTE.
-5. NO TE ADELANTES CON PRECIOS: Si te piden precios ("dame los precios"), diles que el asesor se los pasará por WhatsApp al final, pero NO CIERRES EL CARRITO ni mandes el enlace si faltan datos o si no han pedido cerrar.
-
-FORMATO ESTRICTO DEL ENLACE DE DERIVACIÓN:
-¡PROHIBIDO CORTAR EL ENLACE! Escríbelo completo de principio a fin, sin poner "..." al final. NO USES TILDES, ACENTOS NI LA LETRA "Ñ" DENTRO DE LA URL. IMPRIME SOLO LA URL CRUDA.
-El enlace debe contener todos los productos acumulados en forma de lista. La estructura debe ser LITERALMENTE esta (todo en una sola línea sin espacios reales):
-
-https://woodtools-webhook.onrender.com/wa/{tanda_id}/{tel_10_digitos}/[TELEFONO_DEL_ASESOR_ELEGIDO]?text=Hola,%20quiero%20cotizacion%20de:%0A-%20[producto1]%20[medida1]%20[cantidad1]%0A-%20[producto2]%20[medida2]%20[cantidad2]
+{reglas_modo}
 """
 
 def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=None):
@@ -671,7 +740,10 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
         if not resultado and tanda_id_actual == "ORGANICO":
             execute_db_query("UPDATE metricas_campanas SET respondidos = respondidos + 1 WHERE tanda_id = 'ORGANICO'", commit=True)
         
-        prompt_dinamico = obtener_prompt_personalizado(telefono_cliente)
+        modo_actual = determinar_modo_bot()
+        print(f"[{hora_arg().strftime('%H:%M:%S')}] Procesando chat de {telefono_cliente} en Modo: {modo_actual}")
+        
+        prompt_dinamico = obtener_prompt_personalizado(telefono_cliente, modo_actual)
         
         if resultado:
             historial = json.loads(resultado[0])
@@ -680,7 +752,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
         else:
             historial = [
                 {"role": "user", "parts": [prompt_dinamico]},
-                {"role": "model", "parts": ["Entendido. Guardaré en memoria el carrito, seré breve, no usaré tildes en la URL, entenderé sinónimos para cerrar la venta, no pediré confirmaciones de datos redundantes, y recordaré que las fresas NO son Freud y que no concatenaré cantidades si me dice '1'."]}
+                {"role": "model", "parts": ["Entendido. Soy el bot de WoodTools. Actuaré según mi modo actual (Básico o Inteligente), respetaré el historial, seré breve, sin usar tildes en el enlace, y acataré explícitamente las correcciones del cliente."]}
             ]
             
         if imagen_pil:
@@ -727,11 +799,9 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
     
     PASO 5: ACCIÓN OBLIGATORIA DE RESPUESTA
     1. Identifica el producto usando la lógica correcta.
-    2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto.
+    2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto. 
     3. NUNCA menciones códigos alfanuméricos internos. NUNCA digas que la fresa es marca Freud.
-    4. Continúa tu embudo preguntando SOLO los datos que te falten para cotizar:
-       - Si es FRESA (excepto bisagra y nesting): Diámetro/Ancho, Máquina, Cantidad. (PROHIBIDO preguntar espesor de madera).
-       - Si es MECHA o CNC (ciega, pasante, bisagra, integral o compresión nesting): Diámetro de perforación/corte que necesita, Máquina y Cantidad.
+    4. Lee atentamente en tu prompt en qué "Modo" estás (Básico o Inteligente) y haz la pregunta que corresponda a ese modo para continuar la venta.
     """
                 contenido = [param_vision, imagen_pil]
                 if texto_entrante:
@@ -788,14 +858,14 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
             
         except Exception as e:
             print(f"Error con Gemini: {e}")
-            enviar_mensaje_whatsapp(telefono_cliente, f"🤖 Dame un momento, estoy armando tu carrito...")
+            enviar_mensaje_whatsapp(telefono_cliente, f"🤖 Dame un momento, estoy consultando el catálogo...")
 
 # ==========================================
 # RUTAS DEL WEBHOOK Y NUEVOS ENDPOINTS
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (Versión Integral) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (Versión Modos Horarios) 🚀", 200
 
 @app.route('/wa/<tanda_id>/<telefono_cliente>/<vendedor>', methods=['GET'])
 def redirect_whatsapp(tanda_id, telefono_cliente, vendedor):
