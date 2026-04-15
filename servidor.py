@@ -380,7 +380,7 @@ Cuerpo cilíndrico rojo. 4 a 6 cortantes rectos acompañados por pequeñas punta
 Herramienta compuesta por discos rojos apilados o segmentados con insertos rectangulares y 4 dientes incisores. Firma visual del corte: Ranura rectangular, rebaje o espiga en la madera cuyo ancho interior varía según la cantidad de discos o separación configurada.
 
 [Cepillado] - Cabezales Cepilladores HM:
-Cuerpo ancho tipo rodillo macizo. Posee una gran cantidad de pequeñas placas de HM (40 a 100 dientes) dispuestas en espiral o escalonadas alrededor del cilindro. Firma visual del corte: Rebaje ancho, extenso, liso y totalmente plano, ideal para cepillar caras anchas.
+Cuerpo ancho tipo rodillo macizo. Posee una gran cantidad de pequeñas placas de HM (40 a 100 dientes) dispuestas en espiral o escalonadas alrededor del cilindro. Firma visual del corte: Rebaje ancho, extenso, liso y totally plano, ideal para cepillar caras anchas.
 
 [Ángulos] - Fresas en ángulo HM:
 Cuerpo rojo con 4 o 6 insertos de HM cuyas caras son marcadamente rectas pero inclinadas en diagonal (fuera del eje ortogonal). Firma visual del corte: Deja un plano inclinado, bisel o chanfle (ángulo alfa) limpio y recto en la arista de la tabla de madera.
@@ -590,6 +590,8 @@ Actúa como un asistente experto en herramientas de carpintería y utiliza la si
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresa para Finger HS" y manteniendo el código "FG46S CB2" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 160 mm, un Ancho de corte (B) de 28,6 mm y un Diámetro interior (d) de 50 mm, contando con una configuración de dientes (Z) de 3+3; se describe como una fresa diseñada para unir madera, normalmente de cabeza, destacándose por permitir alcanzar altas velocidades de trabajo.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'fresa para plegado' y básate estrictamente en los siguientes datos técnicos: es una Fresa para Plegado de Melamina, cuenta con un diámetro exterior de aprox. 45 mm, un vástago de 12 mm, un largo útil (LU) de aprox. 29 mm y un radio de 30 mm; cuenta con 2 filos de Metal duro. Su uso es exclusivo para placa de melamina de 18 mm. Ideal para utilizar en Pantógrafos y CNC. Dato extra: se recomienda el uso de pistola de calor para facilitar el plegado y se cuenta con video instructivo. No tiene garantía.
 
+⚠️ REGLA ESTRICTA PARA FRESAS DE COMPRESIÓN (NESTING): Cuando el cliente busque una fresa de compresión o nesting, TIENES ESTRICTAMENTE PROHIBIDO preguntarle qué diámetro exterior o largo útil busca. Debes OFRECER directamente las opciones que tenemos: "Vienen en 8mm, 10mm o 12mm (todas con cabo nominal y 22mm de corte útil). ¿Cuál de estas medidas te sirve?".
+
 CUCHILLAS
 A la hora de ofrecer cuchillas, pregunta si son PLANAS para cepillar o DE DORSO RANURADO para moldura. 
 ⚠️ ATENCIÓN AL CONCEPTO: "Cuchillas de dorso ranurado" es SINÓNIMO EXACTO de "cuchillas para moldurera" o "cuchillas de moldura". Si el cliente dice que quiere cuchillas para moldurera o de moldura, OBLIGATORIAMENTE debes ofrecerle las de "Dorso ranurado". 
@@ -665,7 +667,7 @@ REGLAS DE INDAGACIÓN Y MEMORIA:
 2. FLEXIBILIDAD: Si el cliente TE CORRIGE EXPLÍCITAMENTE, ¡TIENES PERMITIDO CAMBIAR DE HERRAMIENTA!
 3. FIDELIDAD: A menos que te corrija, mantén fija la herramienta acordada.
 4. FLUIDEZ: Haz las preguntas PASO A PASO. ¡PROHIBIDO pedir confirmaciones redundantes! Si te da un dato, acéptalo en silencio y avanza.
-5. RESPONDER "CUALES HAY": Muestra claramente los Diámetros (D) y Anchos de Corte (B) disponibles.
+5. RESPONDER "CUALES HAY" Y MEDIDAS: Muestra claramente los Diámetros (D) y Anchos de Corte (B) disponibles en tu conocimiento. Para Fresas de Compresión, NO preguntes medidas abiertas, ofrécele directamente las de 8mm, 10mm y 12mm.
 6. REGLA DE FUEGO (ESPESOR): ¡ESTRICTAMENTE PROHIBIDO PREGUNTAR POR EL ESPESOR DE LA MADERA EN FRESAS!
 7. BOTÓN DE PÁNICO: Si el cliente pide "humano", "vendedor", o "asesor", genera el enlace INMEDIATAMENTE.
 
@@ -803,7 +805,10 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
     1. Identifica el producto usando la lógica correcta.
     2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto. 
     3. NUNCA menciones códigos alfanuméricos internos. NUNCA digas que la fresa es marca Freud.
-    4. Lee atentamente en tu prompt en qué "Modo" estás (Básico o Inteligente) y haz la pregunta que corresponda a ese modo para continuar la venta.
+    4. Lee atentamente en tu prompt en qué "Modo" estás (Básico o Inteligente).
+       - Si es FRESA (excepto bisagra y nesting): Diámetro/Ancho, Máquina, Cantidad. (PROHIBIDO preguntar espesor de madera).
+       - Si es MECHA (ciega, pasante, bisagra o integral): Diámetro de perforación, Máquina y Cantidad.
+       - Si es COMPRESIÓN (Nesting): NO pidas medidas abiertas. Ofrece las de 8mm, 10mm o 12mm y pregunta Cantidad.
     """
                 contenido = [param_vision, imagen_pil]
                 if texto_entrante:
@@ -867,7 +872,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (Versión Modos Horarios) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (Versión Compresión) 🚀", 200
 
 @app.route('/wa/<tanda_id>/<telefono_cliente>/<vendedor>', methods=['GET'])
 def redirect_whatsapp(tanda_id, telefono_cliente, vendedor):
