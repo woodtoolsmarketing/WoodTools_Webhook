@@ -18,11 +18,12 @@ from PIL import Image
 import threading
 from threading import Lock
 from apscheduler.schedulers.background import BackgroundScheduler
+import unicodedata
 
 app = Flask(__name__)
 
 # ==========================================
-# CONFIGURACIÓN SEGURA (Inteligente)
+# CONFIGURACIÓN SEGURA
 # ==========================================
 posibles_rutas = [
     "/etc/secrets/tokens.json",
@@ -52,7 +53,7 @@ try:
     DATABASE_URL = credenciales_api.get("DATABASE_URL", os.environ.get("DATABASE_URL", ""))
     
     if not DATABASE_URL:
-        print("❌ ERROR FATAL: No se detectó la DATABASE_URL de Neon. Revisa tu archivo json en Render.")
+        print("❌ ERROR FATAL: No se detectó la DATABASE_URL.")
         
 except Exception as e:
     print(f"⚠️ ATENCIÓN: Error procesando credenciales: {e}")
@@ -84,7 +85,6 @@ def get_chat_lock(telefono):
         return chat_locks[telefono]
 
 def hora_arg():
-    """Devuelve la hora actual en Argentina (UTC-3)"""
     return datetime.utcnow() - timedelta(hours=3)
 
 def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=False, retries=1):
@@ -415,7 +415,7 @@ Cuerpo compuesto por un cabo metálico cilíndrico plateado y una parte superior
 [Mechas] - Fresa Bisagra Italiana (MBD / MBI):
 Cuerpo compuesto por un vástago metálico cilíndrico plateado y una cabeza cortante ensanchada y robusta (forma de disco o cilindro ancho). Punta inconfundible: posee una punta guía de centrado, filos rectos para vaciar el fondo, y dos pronunciadas "alas" o incisores curvos en el perímetro exterior que cortan los bordes. REGLA DE COLOR Y GIRO: Si la cabeza es NEGRA, gira a la Derecha (MBD). Si es de otro color (NARANJA o ROJO), gira a la Izquierda (MBI). Firma visual del corte: Perforación cilíndrica ancha, ciega (no pasante) y de fondo plano perfecto, típicamente usada para alojar la "cazoleta" de las bisagras en puertas de muebles (agujeros de 35mm o similar).
 
-[Mechas] - Mecha Integral de Widia (Caja de Cerradura):
+[Mechas] - Mecha Integral de Widia (Caja de Cerradura / CNC):
 Cuerpo macizo monobloque compuesto por una sola pieza de carburo de tungsteno sólido (color metálico plateado oscuro o grisáceo uniforme en toda la herramienta). NO tiene espiral coloreada ni pintada. Visualmente se destaca por una hélice de corte muy agresiva y larga, usualmente con 3 filos (Z=3) que pueden tener un patrón dentado (rompevirutas) en el borde para desbaste rápido, o ser lisos. Posee punta guía central fuerte y filos perimetrales elevados. Suele tener medidas grabadas en láser en el cabo (ej: VHM d16x25x155 RH). Firma visual del corte: Perforación y fresado lateral profundo extremadamente limpio y rápido. Ideal para el fresado profundo como hacer la caja de cerradura en puertas usando pantógrafos o routers CNC.
 
 [CNC / Pantógrafo] - Fresa / Mecha de Compresión (Nesting):
@@ -502,14 +502,10 @@ Actúa como un asistente técnico especializado. Al brindar información sobre e
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2B 2100, cuenta con un diámetro exterior de 500 mm, un ancho de corte (espesor) de 4,4 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto specifically para superficies de Madera, blanda y dura.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2A 0500, cuenta con un diámetro exterior de 180 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera.
 
-FRESAS
-⚠️ REGLA DE MATERIAL PARA FRESAS: Ten en cuenta que TODAS las fresas son ÚNICAMENTE PARA MADERA. La única excepción son las fresas que tengan "6 dientes" o "Z6", las cuales sirven tanto para MADERA como para MELAMINA.
-A la hora de ofrecer fresas OBLIGATORIAMENTE DEBES PREGUNTAR PRIMERO si están buscando fresas RECTAS, de CEPILLADO o de MOLDURA.
-1. Si dice RECTAS: Pregúntale la cantidad de dientes que busca. SÓLO si te dice que son de "6 dientes", pregúntale el material que va a cortar (ya que sirven para madera y melamina). Para cualquier otra cantidad de dientes, ASUME DIRECTAMENTE que es para madera y NO preguntes el material. (Códigos FRS o FRG).
-2. Si dice CEPILLADO: Ofrécele cabezales cepilladores (códigos CB...).
-3. Si dice MOLDURA (o angulares, encastre, etc.): Ofrécele las opciones de moldura (códigos F04C0, F2C, FZS, FR104/156, JFRD, JFFI, JFMS, JFMD, JFMP, JFMP3416G, JFMP34166M, JFDE, JFDSG, FRP5533, JFMPV14, FCPV, JFMPVR, JPMS10, FP402). 
-Para encastre cónico (JFE8122, JFE8121). Para finger (JFE254, JFE5022, FG46S CB2). TODAS estas (salvo las de 6 dientes rectas) asumen que son exclusivamente para madera.
-Para plegado de melamina: Ofrece la "Fresa para Plegado de Melamina" (Código PLEGADO18).
+FRESAS Y MECHAS
+⚠️ REGLA DE MATERIAL: Ten en cuenta que la mayoría de fresas son ÚNICAMENTE PARA MADERA. Sin embargo, para MÁQUINAS CNC/ROUTERS, se ofrecen herramientas especializadas como la Fresa de Compresión (para Melamina) y Mecha Integral (para MDF/Melamina).
+1. Si piden FRESAS RECTAS: Pregúntale la cantidad de dientes. Si piden "6 dientes", pregunta material (sirve para madera y melamina). Si no, ASUME madera y NO preguntes material.
+2. Si piden MECHAS (Pasantes, Ciegas, Bisagra): Vienen con vástagos de 8, 10 o 12mm. Las integrales vienen con vástago nominal.
 
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresas Rectas HM" y manteniendo el código "FRS0054/1006" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) variable de 5 a 100 mm, un Diámetro interior (d) de 40 mm y está disponible con un número de dientes (Z) de 4 o 6, sin dientes incisores (R); se trata de una fresa con cortantes rectos en HM diseñada específicamente para ranurar, cepillar o realizar rebajes, contando con ángulo axial a partir de los 20 mm de ancho de corte.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresas Rectas con Incisores HM" y manteniendo el código "FRSI01542/10066" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) variable de 15 a 100 mm, un Diámetro interior (d) de 40 mm, está disponible con un número de dientes (Z) de 4 o 6 y cuenta con dientes incisores (R) que varían de 2 a 6; se destaca por tener cortantes rectos con ángulo axial e incisores en HM, diseñada específicamente para ranurar sin astillar.
@@ -542,22 +538,6 @@ Actúa como un asistente experto en herramientas de carpintería y utiliza la si
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresa Multimoldura" y manteniendo el código "FP402" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) de 45 mm y un Diámetro interior (d) de 40 mm, contando con un número de dientes (Z) de 2; se describe como una fresa diseñada para realizar distintos tipos de molduras sin necesidad de cambiar los insertos, permitiendo al usuario obtain infinidad de molduras distintas simplemente subiendo o bajando el eje del tupí.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresa para Finger HS" y manteniendo el código "FG46S CB2" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 160 mm, un Ancho de corte (B) de 28,6 mm y un Diámetro interior (d) de 50 mm, contando con una configuración de dientes (Z) de 3+3; se describe como una fresa diseñada para unir madera, normalmente de cabeza, destacándose por permitir alcanzar altas velocidades de trabajo.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'fresa para plegado' y básate estrictamente en los siguientes datos técnicos: es una Fresa para Plegado de Melamina, cuenta con un diámetro exterior de aprox. 45 mm, un vástago de 12 mm, un largo útil (LU) de aprox. 29 mm y un radio de 30 mm; cuenta con 2 filos de Metal duro. Su uso es exclusivo para placa de melamina de 18 mm. Ideal para utilizar en Pantógrafos y CNC. Dato extra: se recomienda el uso de pistola de calor para facilitar el plegado y se cuenta con video instructivo. No tiene garantía.
-
-MECHAS
-Las mechas que vendemos son de origen Italiano y también contamos con línea Integral de Carburo Macizo (Widia). ⚠️ REGLA ESTRICTA: NUNCA menciones la marca "Nordutensil". Siempre refiérete a ellas como "Mechas Italianas".
-Vienen con vástagos de 8mm, 10mm y 12mm en todas sus versiones (soldadas). La línea integral tiene el vástago del mismo diámetro que el corte.
-Cuando te pregunten por mechas, averigua bien qué quieren hacer y en qué máquina.
-- Para perforaciones pasantes (Tupí/Agujereadora): Ofrece "Mecha Pasante Italiana" (Códigos MPD y MPI).
-- Para perforaciones ciegas (Tupí/Agujereadora): Ofrece "Mecha Ciega Italiana" o "Mecha de Barreno" (Códigos MCD y MCI).
-- Para bisagras: Ofrece "Fresa Bisagra Italiana" (Códigos MBD y MBI).
-- Para hacer cajas de cerraduras (Pantógrafo/CNC): Ofrece "Mecha Integral de Widia para Cerraduras" (Diámetro 16mm, Z=3, LU 100mm).
-
-⚠️ REGLA DE COMPRESIÓN / NESTING: Si un cliente pide una "fresa de 8mm" (o 10mm, 12mm) para cortar melamina en un "router" o "pantógrafo" (CNC), OBLIGATORIAMENTE ofrécele la "Fresa de Compresión para Nesting". A veces las llaman fresas en lugar de mechas.
-- Para CNC / Nesting (Máxima duración y acabado en melamina): Ofrece la "Fresa de Compresión para Nesting" (Diseño Up&Down, recubrimiento Ta-C Lafer).
-
-Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'Mecha Integral de Widia' y básate estrictamente en los siguientes datos técnicos: es una Mecha Integral de Widia de origen Italiano, diseñada para Pantógrafos y CNC. Cuenta con un diámetro de 16 mm, 3 filos de corte (Z3), corte útil de 100 mm y vástago nominal. Fabricada en Metal duro macizo (widia integral). Ideal para realizar cajas de cerradura, molduras, y cortes en MDF, Laminados, Melamina, etc.
-
-Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'Fresa de Compresión para Nesting' y básate estrictamente en los siguientes datos técnicos: es una herramienta Italiana de calidad profesional, fabricada en Metal Duro (carburo de tungsteno micrograno). Cuenta con un diámetro de 8 mm (también consultable en 10 o 12mm), vástago de 8 mm y largo útil de 22 mm. Sus dientes son bidireccionales UP AND DOWN (compresión), evitando astillados en ambas caras de la placa. Posee un exclusivo revestimiento ta-c lafer que garantiza 3 veces más rendimiento que una broca convencional. Es ideal para trabajar a alta velocidad de avance en aglomerados, MDF crudo y bilaminados (melamina) en máquinas CNC o pantógrafos.
 
 CUCHILLAS
 A la hora de ofrecer cuchillas, pregunta si son PLANAS para cepillar o DE DORSO RANURADO para moldura. 
@@ -747,10 +727,10 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
     
     PASO 5: ACCIÓN OBLIGATORIA DE RESPUESTA
     1. Identifica el producto usando la lógica correcta.
-    2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto. (Ej: "¡Claro! Esa es una Fresa de Compresión para Nesting..." o "Es una Mecha Integral de Widia para cerraduras...").
+    2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto.
     3. NUNCA menciones códigos alfanuméricos internos. NUNCA digas que la fresa es marca Freud.
     4. Continúa tu embudo preguntando SOLO los datos que te falten para cotizar:
-       - Si es FRESA (excepto bisagra y nesting 8mm): Diámetro/Ancho, Máquina, Cantidad. (PROHIBIDO preguntar espesor de madera).
+       - Si es FRESA (excepto bisagra y nesting): Diámetro/Ancho, Máquina, Cantidad. (PROHIBIDO preguntar espesor de madera).
        - Si es MECHA o CNC (ciega, pasante, bisagra, integral o compresión nesting): Diámetro de perforación/corte que necesita, Máquina y Cantidad.
     """
                 contenido = [param_vision, imagen_pil]
@@ -770,7 +750,6 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
                 texto_limpio = texto_respuesta.replace(raw_url, "").strip()
                 texto_limpio = texto_limpio.replace("👉", "").replace("Hacé clic en este enlace para hablar con él", "").strip()
                 
-                import unicodedata
                 url_limpia = urllib.parse.unquote(raw_url)
                 url_limpia = ''.join((c for c in unicodedata.normalize('NFD', url_limpia) if unicodedata.category(c) != 'Mn'))
                 link_extraido = urllib.parse.quote(url_limpia, safe=':/?&=%')
@@ -809,14 +788,14 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
             
         except Exception as e:
             print(f"Error con Gemini: {e}")
-            enviar_mensaje_whatsapp(telefono_cliente, f"🤖 Dame un momento, estoy consultando el catálogo...")
+            enviar_mensaje_whatsapp(telefono_cliente, f"🤖 Dame un momento, estoy armando tu carrito...")
 
 # ==========================================
 # RUTAS DEL WEBHOOK Y NUEVOS ENDPOINTS
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
 def inicio():
-    return "🚀 Webhook WoodTools + IA Gemini (Versión Carrito de Compras Final) 🚀", 200
+    return "🚀 Webhook WoodTools + IA Gemini (Versión Integral) 🚀", 200
 
 @app.route('/wa/<tanda_id>/<telefono_cliente>/<vendedor>', methods=['GET'])
 def redirect_whatsapp(tanda_id, telefono_cliente, vendedor):
