@@ -5,8 +5,9 @@ from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, redirect
 import requests
 import gspread
-from google.oauth2.credentials import Credentials 
-from apscheduler.schedulers.background import BackgroundScheduler
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request 
 import google.generativeai as genai
 import json
 import psycopg2 
@@ -16,6 +17,7 @@ import io
 from PIL import Image
 import threading
 from threading import Lock
+from apscheduler.schedulers.background import BackgroundScheduler
 
 app = Flask(__name__)
 
@@ -80,6 +82,10 @@ def get_chat_lock(telefono):
         if telefono not in chat_locks:
             chat_locks[telefono] = Lock()
         return chat_locks[telefono]
+
+def hora_arg():
+    """Devuelve la hora actual en Argentina (UTC-3)"""
+    return datetime.utcnow() - timedelta(hours=3)
 
 def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=False, retries=1):
     if not db_pool:
@@ -242,7 +248,7 @@ def bloquear_numero_en_sheets(telefono):
 # ==========================================
 def revisar_rutinas_de_tiempo():
     try:
-        ahora = datetime.now()
+        ahora = hora_arg()
         
         hace_48_horas = ahora - timedelta(hours=48)
         para_borrar = execute_db_query("SELECT id, telefono FROM mensajes WHERE estado='sent' AND fecha < %s", (hace_48_horas,), fetchall=True)
@@ -271,7 +277,7 @@ def revisar_rutinas_de_tiempo():
                         INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
                         VALUES (%s, %s, %s, %s)
                         ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
-                    """, (telefono, vendedor_asignado, json.dumps(historial_limpio), datetime.now()), commit=True)
+                    """, (telefono, vendedor_asignado, json.dumps(historial_limpio), hora_arg()), commit=True)
 
                     ultimo_msg_cliente = "Sin mensajes recientes."
                     for msg in reversed(historial_limpio):
@@ -399,6 +405,24 @@ Cuerpo rojo. Perfil escalonado y continuo de aspecto ondulante, conformado por l
 
 [Molduras] - Fresa Multimoldura:
 Cuerpo cilíndrico masivo rojo, llamativamente provisto de unicamente dos insertos (Z=2). Su filo HM dibuja una curva extremadamente extendida, un mapa topográfico continuo compuesto de picos, valles suaves, saltos planos y lomas. Firma visual del corte: Fresa arquitectónica matriz. Jamás marca su perfil íntegro en la madera; el operario ajusta la altura del tupí para que la madera (la parte dorada) sea atacada solo por un segmento del filo (ignorando el resto de la placa plateada). Según el ajuste de altura, genera múltiples tipos de corte: 1) Boleados convexos simples o redondeo en la arista. 2) Vaciados cóncavos profundos con escalones. 3) Perfiles clásicos tipo "pecho paloma" (curva en S). 4) Escalones rectos que bajan hacia pequeñas canaletas cóncavas. 5) Rebajes extremos que dejan una fina lengüeta recta sobresaliendo. 6) Molduras arquitectónicas compuestas que combinan curvas convexas, picos filosos y lomas suaves en una misma pasada.
+
+[Mechas] - Mecha Ciega Italiana (MCD / MCI):
+También conocida como Mecha de Barreno. Cuerpo compuesto por un cabo metálico cilíndrico plateado y una parte superior helicoidal (espiral) coloreada. Punta inconfundible y característica: cuenta con un pico de guía central (Brad Point), filos principales de corte y, fundamentalmente, **dos incisores periféricos (scorers/ruteadores) elevados y afilados** en los extremos del diámetro. REGLA DE COLOR Y GIRO: Si la espiral es NEGRA, gira a la Derecha (MCD). Si la espiral es de otro color (NARANJA o ROJO), gira a la Izquierda (MCI). Firma visual del corte: Perforación ciega perfecta. Hace un agujero cilíndrico que no atraviesa la tabla, dejando un fondo plano con un puntito en el medio y bordes superiores totalmente limpios y sin astillar, ideales para encastres con tarugos.
+
+[Mechas] - Mecha Pasante Italiana (MPD / MPI):
+Cuerpo compuesto por un cabo metálico cilíndrico plateado y una parte superior helicoidal (espiral) coloreada. Punta inconfundible y característica: tiene una geometría helicoidal muy pronunciada que termina en una punta central muy afilada. A diferencia de la mecha ciega, esta no tiene incisores laterales planos, sino que los mismos filos helicoidales continúan hasta la punta. REGLA DE COLOR Y GIRO: Si la espiral es NEGRA, gira a la Derecha (MPD). Si la espiral es de otro color (NARANJA o ROJO), gira a la Izquierda (MPI). Firma visual del corte: Perforación pasante. Hace un agujero cilíndrico perfecto que atraviesa completamente la tabla de lado a lado. Diseñada para una evacuación rápida de viruta y una salida limpia sin astillar la cara posterior de la madera.
+
+[Mechas] - Fresa Bisagra Italiana (MBD / MBI):
+Cuerpo compuesto por un vástago metálico cilíndrico plateado y una cabeza cortante ensanchada y robusta (forma de disco o cilindro ancho). Punta inconfundible: posee una punta guía de centrado, filos rectos para vaciar el fondo, y dos pronunciadas "alas" o incisores curvos en el perímetro exterior que cortan los bordes. REGLA DE COLOR Y GIRO: Si la cabeza es NEGRA, gira a la Derecha (MBD). Si es de otro color (NARANJA o ROJO), gira a la Izquierda (MBI). Firma visual del corte: Perforación cilíndrica ancha, ciega (no pasante) y de fondo plano perfecto, típicamente usada para alojar la "cazoleta" de las bisagras en puertas de muebles (agujeros de 35mm o similar).
+
+[Mechas] - Mecha Integral de Widia (Caja de Cerradura):
+Cuerpo macizo monobloque compuesto por una sola pieza de carburo de tungsteno sólido (color metálico plateado oscuro o grisáceo uniforme en toda la herramienta). NO tiene espiral coloreada ni pintada. Visualmente se destaca por una hélice de corte muy agresiva y larga, usualmente con 3 filos (Z=3) que pueden tener un patrón dentado (rompevirutas) en el borde para desbaste rápido, o ser lisos. Posee punta guía central fuerte y filos perimetrales elevados. Suele tener medidas grabadas en láser en el cabo (ej: VHM d16x25x155 RH). Firma visual del corte: Perforación y fresado lateral profundo extremadamente limpio y rápido. Ideal para el fresado profundo como hacer la caja de cerradura en puertas usando pantógrafos o routers CNC.
+
+[CNC / Pantógrafo] - Fresa / Mecha de Compresión (Nesting):
+Cuerpo macizo monobloque. Su rasgo visual más inconfundible es su revestimiento "ta-c lafer", que a menudo le da un brillo iridiscente, tornasolado (arcoíris) o negro muy pulido. Sus canales en espiral son bidireccionales: una parte de la hélice sube y la otra baja, encontrándose en el medio (geometría de compresión). Firma visual del corte: Fresado lateral y perforación en placas bilaminadas (melamina/MDF) con un acabado perfecto en ambas caras (arriba y abajo) sin el más mínimo astillado, gracias a que comprime la viruta hacia el centro. Típica de mesas Nesting y Routers CNC.
+
+[CNC / Pantógrafo] - Fresa para Plegado de Melamina: 
+Cuerpo con vástago de 12mm. Cabeza de corte muy ancha (aprox 45mm) con un perfil inconfundible en forma de "reloj de arena", "mariposa" o "V" curva invertida. Tiene 2 filos macizos de metal duro. A veces viene en una cajita de protección roja. Firma visual del corte: Talla un canal ancho y profundo con curvas específicas en placas de melamina de 18mm, vaciando el material hasta dejar solo la lámina exterior intacta. Esto permite luego "doblar" o "plegar" la placa a 90 grados (ayudado con pistola de calor) sin que se note la unión.
 """
 
 BASE_CONOCIMIENTO = """
@@ -413,10 +437,10 @@ Los códigos alfanuméricos de las herramientas (ej: LU3F-0200, LU5B 0300, LG3D 
 TIENES PROHIBIDO ABSOLUTAMENTE escribirlos en el chat conversacional con el cliente. Tampoco debes inyectarlos en el enlace de derivación.
 Para referirte a una herramienta en el chat o en el enlace, usa SOLO su nombre genérico, marca, diámetro exterior y cantidad de dientes. 
 
-⚠️ REGLA CRÍTICA DE MARCAS ⚠️
+⚠️ REGLA CRÍTICA DE MARCAS (¡NUEVA Y ESTRICTA!) ⚠️
 - Las SIERRAS CIRCULARES son marca Freud o Franzoi.
 - Las FRESAS, MECHAS y CUCHILLAS son de la línea WoodTools, marca Italiana o Franzoi.
-- ¡TIENES ESTRICTAMENTE PROHIBIDO decir que una Fresa es de marca Freud! NUNCA asocies la palabra "Freud" a una fresa (ni en el chat ni en el carrito).
+- ¡TIENES ESTRICTAMENTE PROHIBIDO decir que una Fresa es de marca Freud! NUNCA asocies la palabra "Freud" a una fresa, ni siquiera si el cliente lo dice. Si ofreces una Fresa, di "Fresa [Nombre] de WoodTools".
 
 SIERRAS CIRCULARES
 A la hora de ofrecer las sierras circulares preguntar qué material cortan EXCEPTO si ya te piden "sierra con incisor".
@@ -453,7 +477,7 @@ Actúa como un asistente técnico especializado. Al brindar información sobre e
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU3F 0400, cuenta con un diámetro exterior de 350 mm, un ancho de corte (espesor) de 3,5 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Melamina.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU3F-0200 250 Z80, cuenta con un diámetro exterior de 250 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Widia y su uso es apto específicamente para superficies de Melamina.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU3D0600, cuenta con un diámetro exterior de 300 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Melamina.
-Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo FREUD (Línea Wood Tools), cuenta con un diámetro exterior de 220 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto specifically para superficies de Melamina.
+Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo FREUD (Línea Wood Tools), cuenta con un diámetro exterior de 220 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su use is apt specifically for Melamine surfaces.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU3D 0200, cuenta con un diámetro exterior de 220 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Melamina.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LG2A 2100, cuenta con un diámetro exterior de 300 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; su modelo detallado corresponde a tipo de diente alterno, está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera (Ideal para cortes universales: a favor y en contra de la veta / horizontales y de cabeza).
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LG2B 1100, cuenta con un diámetro exterior de 300 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera.
@@ -473,7 +497,7 @@ Actúa como un asistente técnico especializado. Al brindar información sobre e
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2C 1500, cuenta con un diámetro exterior de 300 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera (EXCLUSIVO para cortes transversales / de cabeza / en contra de la veta. NO usar a favor de la veta).
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2A 3100, cuenta con un diámetro exterior de 400 mm, un ancho de corte (espesor) de 4 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera (modelo para madera blanda y dura).
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2A 0800, cuenta con un diámetro exterior de 200 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera.
-Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2A 3300, cuenta con un diámetro exterior de 400 mm, un ancho de corte (espesor) de 4 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera.
+Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' and básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2A 3300, cuenta con un diámetro exterior de 400 mm, un ancho de corte (espesor) de 4 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo FI14M AA3, cuenta con un diámetro exterior de 150 mm, un ancho de corte (espesor) de 1,5 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2B 2100, cuenta con un diámetro exterior de 500 mm, un ancho de corte (espesor) de 4,4 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto specifically para superficies de Madera, blanda y dura.
 Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'sierra circular' y básate estrictamente en los siguientes datos técnicos: es un producto de marca Freud, modelo LU2A 0500, cuenta con un diámetro exterior de 180 mm, un ancho de corte (espesor) de 3,2 mm y un diámetro central de 30 mm; está fabricado en Carburo de tungsteno (HM) Widia y su uso es apto específicamente para superficies de Madera.
@@ -485,19 +509,20 @@ A la hora de ofrecer fresas OBLIGATORIAMENTE DEBES PREGUNTAR PRIMERO si están b
 2. Si dice CEPILLADO: Ofrécele cabezales cepilladores (códigos CB...).
 3. Si dice MOLDURA (o angulares, encastre, etc.): Ofrécele las opciones de moldura (códigos F04C0, F2C, FZS, FR104/156, JFRD, JFFI, JFMS, JFMD, JFMP, JFMP3416G, JFMP34166M, JFDE, JFDSG, FRP5533, JFMPV14, FCPV, JFMPVR, JPMS10, FP402). 
 Para encastre cónico (JFE8122, JFE8121). Para finger (JFE254, JFE5022, FG46S CB2). TODAS estas (salvo las de 6 dientes rectas) asumen que son exclusivamente para madera.
+Para plegado de melamina: Ofrece la "Fresa para Plegado de Melamina" (Código PLEGADO18).
 
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresas Rectas HM" y manteniendo el código "FRS0054/1006" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) variable de 5 a 100 mm, un Diámetro interior (d) de 40 mm y está disponible con un número de dientes (Z) de 4 o 6, sin dientes incisores (R); se trata de una fresa con cortantes rectos en HM diseñada específicamente para ranurar, cepillar o realizar rebajes, contando con ángulo axial a partir de los 20 mm de ancho de corte.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresas Rectas con Incisores HM" y manteniendo el código "FRSI01542/10066" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) variable de 15 a 100 mm, un Diámetro interior (d) de 40 mm, está disponible con un número de dientes (Z) de 4 o 6 y cuenta con dientes incisores (R) que varían de 2 a 6; se destaca por tener cortantes rectos con ángulo axial e incisores en HM, diseñada específicamente para ranurar sin astillar.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresas para Ranurar Regulables HM" y manteniendo los códigos "FRG0510" y "FRG1039" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 160 mm y un Diámetro interior (d) de 40 mm, y cuentan con 4 dientes incisores (R); están disponibles en dos variantes principales según su capacidad de regulación: una para un Ancho de corte (B) de 5 a 10 mm (con disposición de dientes Z de 2x4 y un ancho de corte del diente (b) de 5 mm) y otra para un Ancho de corte (B) de 10 a 39 mm (con disposición de dientes Z de 3x4 y un ancho de corte del diente (b) de 10 mm); se describe como un juego de fresas regulables con cortantes en HM diseñadas específicamente para realizar ranuras, rebajes y espigas.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Cabezales Cepilladores HM" y manteniendo los códigos "CB0500640", "CB0750660", "CB1000690", "CB13006100", "CB1601272", "CB1801280" y "CB22012100" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 125 mm y un Diámetro interior (d) de 40 mm en todas sus versiones; varían significativamente en su Ancho de corte (B) que va desde 55 mm hasta 220 mm, su número de dientes (Z) que oscila entre 40 y 100, y el ancho de corte del diente (b) que es de 6 mm para los modelos más angostos (hasta 130 mm de ancho) y de 12 mm para los modelos más anchos (desde 160 mm); se describen como cabezales cepilladores con cortantes en HM diseñados para cepillar o espigar, destacándose por su bajo nivel de ruido y menor consumo de energía.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresas en ángulo HM" y manteniendo el código "FA104/506" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) variable de 10 a 50 mm, un Diámetro interior (d) de 40 mm y está disponible con un número de dientes (Z) de 4 o 6; se describe como una fresa con cortantes en HM diseñada específicamente para efectuar ángulos.
-Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresas 1/4 círculo cóncavo y convexo HM" y manteniendo los códigos "F04C014", "F04C016", "F04C054" y "F04C056" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 150 mm y un Diámetro interior (d) de 40 mm; están disponibles con un número de dientes (Z) de 4 o 6 y varían en su Ancho de corte (B) ofreciendo opciones de 1/2" a 3/4" y de 3/4" a 1 1/4"; se describen como fresas con cortantes en HM y ángulo axial diseñadas para efectuar trabajos de 1/4 de círculo cóncavo o convexo en formas A, B, C o D.
+Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresas 1/4 círculo cóncavo y convexo HM" y manteniendo los códigos "F04C014", "F04C016", "F04C054" y "F04C056" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 150 mm y un Diámetro interior (d) de 40 mm; están disponibles con un número de dientes (Z) de 4 o 6 y varían en su Ancho de corte (B) offering options from 1/2" to 3/4" and from 3/4" to 1 1/4"; they are described as mills with cutting edges in HM and axial angle designed to perform works of 1/4 of concave or convex circle in forms A, B, C or D.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresas 1/2 círculo cóncavo y convexo HM" y manteniendo los códigos "F2C014", "F2C054", "F2C104", "F2C154", "F2C204", "F2C254" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 150 mm y un Diámetro interior (d) de 40 mm, están disponibles con un número de dientes (Z) de 4 o 6 y ofrecen diversas opciones de Ancho de corte (B) que incluyen 1/2", 5/8", 3/4", 1", 1 1/2" y 2"; se describen como fresas con cortantes en HM diseñadas específicamente para efectuar figuras de medio círculo cóncavo o convexo.
-Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Zócalo Simple y Contramarco HM" y manteniendo los códigos "FZS128" y "FZS129" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) de 1/2" a 3/4" y un Diámetro interior (d) de 40 mm, contando con un número de dientes (Z) de 4; el producto ofrece dos variantes funcionales: una configuración para efectuar zócalos que combina una fresa A y una fresa B (código FZS128), y una configuración para efectuar contramarcos que utiliza dos fresas A (código FZS129); se describen como herramientas con cortantes en HM diseñadas específicamente para la fabricación de estas molduras.
+Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Zócalo Simple y Contramarco HM" y manteniendo los códigos "FZS128" y "FZS129" solo para identificación interna a menos que el cliente lo pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) de 1/2" a 3/4" y un Diámetro interior (d) de 40 mm, contando con un número de dientes (Z) de 4; el producto ofrece dos variantes funcionales: una configuración para efectuar zócalos que combina una fresa A y una fresa B (código FZS128), y una configuración para efectuar contramarcos que utiliza dos fresas A (código FZS129); se describen como herramientas con cortantes en HM diseñadas específicamente para la fabricación de estas molduras.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Rinconera Simple HM" y manteniendo el código "FR104/156" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) variable de 3/4" a 1 1/2", un Diámetro interior (d) de 40 mm y está disponible con un número de dientes (Z) de 4 o 6; se describe como una fresa con cortantes en HM diseñada específicamente para efectuar rinconera según los modelos 1 o 2.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Rinconera Doble HM" y manteniendo el código "JFRD" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 160 mm, un Ancho de corte (B) de 1" y un Diámetro interior (d) de 40 mm; cuenta con una configuración de dientes (Z) de 2x4 y 1x10, compuesta por fresas con 4 cortantes cada una y una sierra circular con 10 cortantes, todos en HM; está diseñada específicamente para efectuar rinconera doble según los modelos 1 o 2.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Frente Inglés HM" y manteniendo los códigos "JFFI01" y "JFFI05" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 175 mm, un Ancho de corte (B) variable de 1/2" a 1" y un Diámetro interior (d) de 40 mm; cuentan con una configuración de dientes (Z) de 4 x 4 y están disponibles en las variantes A y B; se describen como fresas regulables con 4 cortantes en HM diseñadas específicamente para realizar frente inglés simple y machimbrado.
-Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Machimbre Simple HM" y manteniendo los códigos "JFMS1234" y "JFMS34114" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 155 mm y un Diámetro interior (d) de 40 mm; están disponibles en dos variantes principales según el espesor de trabajo: una para un Ancho de corte (B) de 1/2" a 3/4" con una configuración de dientes (Z) compleja de 5x4 y 1x16, y otra para un Ancho de corte (B) de 3/4" a 1 1/4" con una configuración de dientes (Z) de 6x4; se describen como fresas con cortantes en HM diseñadas específicamente para efectuar machimbre simple biselado o bajo fondo.
+Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Machimbre Simple HM" y manteniendo los códigos "JFMS1234" and "JFMS34114" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 155 mm y un Diámetro interior (d) de 40 mm; están disponibles en dos variantes principales según el espesor de trabajo: una para un Ancho de corte (B) de 1/2" a 3/4" con una configuración de dientes (Z) compleja de 5x4 y 1x16, y otra para un Ancho de corte (B) de 3/4" a 1 1/4" con una configuración de dientes (Z) de 6x4; se describen como fresas con cortantes en HM diseñadas específicamente para efectuar machimbre simple biselado o bajo fondo.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Machimbre Doble HM" y manteniendo el código "JFMD1234" solo para identificación interna a menos que el cliente lo pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 155 mm, un Ancho de corte (B) de 1/2" a 3/4" y un Diámetro interior (d) de 40 mm; cuentan con una configuración de dientes (Z) compleja de 10x4 y 2x16; se describen como fresas con cortantes en HM diseñadas específicamente para realizar machimbre doble con chanfle o bajo fondo.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Machimbre Piso Standard" y manteniendo los códigos "JFMP3411" y "JFMP3416" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro interior (d) de 40 mm y se presentan en dos variantes principales; la primera tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) de 3/4" a 1 1/4" y una configuración de dientes (Z) de 4 x 4, mientras que la segunda tiene un Diámetro exterior (D) de 160 mm, un Ancho de corte (B) de 5/8" a 1" y una configuración de dientes (Z) de 4 x 6; se describen como un juego de 4 fresas con cortantes diseñadas para realizar machimbre de piso con junta abierta, destacándose por tener macho y hembra redondeados.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Machimbre Piso para Grampa" y manteniendo el código "JFMP3416G" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 180 mm, un Ancho de corte (B) variable de 5/8" a 1" y un Diámetro interior (d) de 40 mm; cuenta con una configuración de dientes (Z) de 4x6+6; se describe como un juego de 4 fresas con 6 cortantes diseñadas específicamente para realizar machimbre de piso con junta abierta, destacándose por incluir la incisión necesaria para colocar grampa de sujeción.
@@ -505,26 +530,34 @@ Actúa como un asistente experto en herramientas de carpintería y utiliza la si
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Deck Standard HM" y manteniendo los códigos "JFDE4" y "JFDE6" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro interior (d) de 40 mm y un Ancho de corte (B) variable de 3/4" a 1"; se presentan en dos variantes principales: una con Diámetro exterior (D) de 150 mm y configuración de dientes (Z) de 2x4, y otra con Diámetro exterior (D) de 160 mm y configuración de dientes (Z) de 2x6; se describen como un juego de 2 fresas regulables para distintos espesores de madera, diseñadas para realizar deck tradicional y utilizadas principalmente en machimbradora.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Deck para Grampa HM" y manteniendo los códigos "JFDSG14" y "JFDSG16" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro exterior (D) de 160 mm, un Ancho de corte (B) de 1" y un Diámetro interior (d) de 40 mm; se describen como un juego compuesto por 4 fresas y 2 sierras diseñado específicamente para realizar deck para montaje con grampa plástica (usado normalmente en machimbradora) y están disponibles en dos configuraciones de dientes (Z) complejas: una de 4x4 y 2x8, y otra de 4x6 y 2x12.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Replán de Tablero HM" y manteniendo el código "FRP5533" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 200 mm, un Ancho de corte (B) de 55 mm y un Diámetro interior (d) de 40 mm, contando con una configuración de dientes (Z) de 3+3 y una medida b de 20 mm; se describe como una fresa con cortantes en HM diseñada para realizar replan de tablero y se fabrica en dos versiones operativas según la preferencia del usuario: fresa sobre madera o madera sobre fresa.
-Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Moldura de Puertas y Ventanas HM" y manteniendo el código "JFMPV14" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) variable de 1 1/2" a 2" y un Diámetro interior (d) de 40 mm; cuenta con una configuración de dientes (Z) de 2x4 y 1x6; se describe como un juego compuesto de 2 fresas de moldura y una fresa ranuradora con cortantes en HM, diseñado específicamente para realizar molduras de puertas y ventanas que incluyan ranura para tableros o vidrios.
-Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Contramolduras de Puertas y Ventanas HM" y manteniendo los códigos "FCPV41", "FCPV6" y "FCPV61" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas comparten un Ancho de corte (B) variable de 1 1/2" a 2" y un Diámetro interior (d) de 40 mm, pero se diferencian en sus dimensions externas; el primer modelo ofrece un Diámetro exterior (D) de 150 mm con un número de dientes (Z) de 4, mientras que los modelos más grandes ofrecen un Diámetro exterior (D) de 250 mm o 320 mm, ambos con un número de dientes (Z) de 6; se describen como fresas con cortantes en HM diseñadas específicamente para realizar contramolduras utilizando espigadoras o tupíes.
+Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Moldura de Puertas y Ventanas HM" y manteniendo el código "JFMPV14" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) variable de 1 1/2" a 2" y un Diámetro interior (d) de 40 mm; cuenta con una configuración de dientes (Z) de 2x4 and 1x6; se describe como un juego compuesto de 2 fresas de moldura y una fresa ranuradora con cortantes en HM, diseñado específicamente para realizar molduras de puertas y ventanas que incluyan ranura para tableros o vidrios.
+Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Contramolduras de Puertas y Ventanas HM" y manteniendo los códigos "FCPV41", "FCPV6" y "FCPV61" solo para identification interna a menos que el cliente los pida explícitamente: estas herramientas comparten un Ancho de corte (B) variable de 1 1/2" a 2" y un Diámetro interior (d) de 40 mm, pero se diferencian en sus dimensiones externas; el primer modelo ofrece un Diámetro exterior (D) de 150 mm con un número de dientes (Z) de 4, mientras que los modelos más grandes ofrecen un Diámetro exterior (D) de 250 mm o 320 mm, ambos con un número de dientes (Z) de 6; se describen como fresas con cortantes en HM diseñadas específicamente para realizar contramolduras utilizando espigadoras o tupíes.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Moldura de Puertas y Ventanas Simple HM" y manteniendo el código "JFMPVR" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 180 mm, un Ancho de corte (B) variable de 35 a 45 mm y un Diámetro interior (d) de 40 mm; cuenta con una configuración de dientes (Z) compleja de 1x2+2 y 2x4; se describe como un juego compuesto de 1 fresa tipo replán y 2 fresas rectas con cortantes en HM, diseñado específicamente para realizar molduras, contramolduras y replán.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Puerta de Muebles HM" y manteniendo el código "JFPMS10" solo para identification interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 160 mm, un Ancho de corte (B) de 1" y un Diámetro interior (d) de 40 mm, contando con una configuración de dientes (Z) de 1x4 y 1x6; se describe como un juego compuesto de una fresa de moldura y una ranuradora, diseñado específicamente para efectuar moldura, contramoldura y replan de puertas de muebles de cocina y vanitoris.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresa para Finger HM" y manteniendo el código "JFE254" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) de 22 mm y un Diámetro interior (d) de 40 mm, contando con un número de dientes (Z) de 4; se describe como una fresa con cortantes en HM diseñada para realizar uniones "finger" en maderas de hasta 22 mm, siendo especialmente usada en tupí o moldureras para unir madera a lo largo para tableros de puertas.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresa para Finger HM" y manteniendo el código "JFE5022" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) de 45 mm y un Diámetro interior (d) de 40 mm, contando con una configuración de dientes (Z) de 2 + 2; se describe como una fresa con cortantes en HM diseñada para realizar uniones "finger" en maderas de hasta 45 mm, siendo especialmente indicada para unir a lo largo maderas para tableros de puertas, largueros y travesaños utilizando tupí o moldureras.
-Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresa para Ensamble Cónico HM" y manteniendo los códigos "JFE8122" y "JFE8121" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro interior (d) de 40 mm y se presentan en dos variantes; la primera tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) variable de 10 a 45 mm y una configuración de dientes (Z) de 4 x 4, mientras que la segunda tiene un Diámetro exterior (D) de 160 mm, un Ancho de corte (B) de 3,8 mm y una configuración de dientes (Z) de 1 x 4; se describen como un juego de fresas con 4 cortantes en HM diseñadas para unir madera, permitiendo profundidades de trabajo de 10-11 mm, 8-9 mm y 12 mm.
-Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresa para Encastre HM" y manteniendo los códigos "JFE8Z122", "JFE8Z124" y "JFME68" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro interior (d) de 40 mm y una configuración de dientes (Z) de 3+3; se presentan en variantes con Diámetro exterior (D) de 180 mm y Ancho de corte (B) de 19 a 40 mm (disponibles en tipo A y B), y una versión mayor con Diámetro exterior (D) de 245 mm y Ancho de corte (B) de 22 a 68 mm (tipo B); se describen como herramientas utilizadas para ensamble a 90º y 180º, cuya principal aplicación es la unión de marcos en puertas y ventanas garantizando perfecta escuadra y rápido ensamble.
+Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresa para Ensamble Cónico HM" y manteniendo los códigos "JFE8122" and "JFE8121" solo para identificación interna a menos que el cliente los pida explícitamente: estas herramientas tienen un Diámetro interior (d) de 40 mm y se presentan en dos variantes; la primera tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) variable de 10 a 45 mm y una configuración de dientes (Z) de 4 x 4, mientras que la segunda tiene un Diámetro exterior (D) de 160 mm, un Ancho de corte (B) de 3,8 mm y una configuración de dientes (Z) de 1 x 4; se describen como un juego de fresas con 4 cortantes en HM diseñadas para unir madera, permitiendo profundidades de trabajo de 10-11 mm, 8-9 mm y 12 mm.
+Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresa para Encastre HM" y manteniendo los códigos "JFE8Z122", "JFE8Z124" y "JFME68" solo para identificación interna a menos que el cliente lo pida explícitamente: estas herramientas tienen un Diámetro interior (d) de 40 mm y una configuración de dientes (Z) de 3+3; se presentan en variantes con Diámetro exterior (D) de 180 mm y Ancho de corte (B) de 19 a 40 mm (disponibles en tipo A y B), y una versión mayor con Diámetro exterior (D) de 245 mm y Ancho de corte (B) de 22 a 68 mm (tipo B); se describen como herramientas utilizadas para ensamble a 90º y 180º, cuya principal aplicación es la unión de marcos en puertas y ventanas garantizando perfecta escuadra y rápido ensamble.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresa para Radios Múltiples HM" y manteniendo el código "FMR04" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 140 mm, un Ancho de corte (B) de 35 mm y un Diámetro interior (d) de 40 mm, contando con un número de dientes (Z) de 4; se describe como una fresa con 4 cortantes en HM diseñada específicamente para realizar multi-radios de 4 a 10 mm.
-Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresa Multimoldura" y manteniendo el código "FP402" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) de 45 mm y un Diámetro interior (d) de 40 mm, contando con un número de dientes (Z) de 2; se describe como una fresa diseñada para realizar distintos tipos de molduras sin necesidad de cambiar los insertos, permitiendo al usuario obtener infinidad de molduras distintas simplemente subiendo o bajando el eje del tupí.
+Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresa Multimoldura" y manteniendo el código "FP402" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 150 mm, un Ancho de corte (B) de 45 mm y un Diámetro interior (d) de 40 mm, contando con un número de dientes (Z) de 2; se describe como una fresa diseñada para realizar distintos tipos de molduras sin necesidad de cambiar los insertos, permitiendo al usuario obtain infinidad de molduras distintas simplemente subiendo o bajando el eje del tupí.
 Actúa como un asistente experto en herramientas de carpintería y utiliza la siguiente información técnica para responder consultas, asegurándote de referirte al producto siempre por su nombre público "Fresa para Finger HS" y manteniendo el código "FG46S CB2" solo para identificación interna a menos que el cliente lo pida explícitamente: esta herramienta tiene un Diámetro exterior (D) de 160 mm, un Ancho de corte (B) de 28,6 mm y un Diámetro interior (d) de 50 mm, contando con una configuración de dientes (Z) de 3+3; se describe como una fresa diseñada para unir madera, normalmente de cabeza, destacándose por permitir alcanzar altas velocidades de trabajo.
+Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'fresa para plegado' y básate estrictamente en los siguientes datos técnicos: es una Fresa para Plegado de Melamina, cuenta con un diámetro exterior de aprox. 45 mm, un vástago de 12 mm, un largo útil (LU) de aprox. 29 mm y un radio de 30 mm; cuenta con 2 filos de Metal duro. Su uso es exclusivo para placa de melamina de 18 mm. Ideal para utilizar en Pantógrafos y CNC. Dato extra: se recomienda el uso de pistola de calor para facilitar el plegado y se cuenta con video instructivo. No tiene garantía.
 
 MECHAS
-Las mechas que vendemos son de origen Italiano. ⚠️ REGLA ESTRICTA: NUNCA menciones la marca "Nordutensil". Siempre refiérete a ellas como "Mechas Italianas".
-Vienen con vástagos de 8mm, 10mm y 12mm en todas sus versiones.
-Cuando te pregunten por mechas, averigua bien qué quieren hacer.
-- Para perforaciones pasantes: Ofrece "Mecha Pasante Italiana" (Códigos MPD y MPI).
-- Para perforaciones ciegas: Ofrece "Mecha Ciega Italiana" (Códigos MCD y MCI).
+Las mechas que vendemos son de origen Italiano y también contamos con línea Integral de Carburo Macizo (Widia). ⚠️ REGLA ESTRICTA: NUNCA menciones la marca "Nordutensil". Siempre refiérete a ellas como "Mechas Italianas".
+Vienen con vástagos de 8mm, 10mm y 12mm en todas sus versiones (soldadas). La línea integral tiene el vástago del mismo diámetro que el corte.
+Cuando te pregunten por mechas, averigua bien qué quieren hacer y en qué máquina.
+- Para perforaciones pasantes (Tupí/Agujereadora): Ofrece "Mecha Pasante Italiana" (Códigos MPD y MPI).
+- Para perforaciones ciegas (Tupí/Agujereadora): Ofrece "Mecha Ciega Italiana" o "Mecha de Barreno" (Códigos MCD y MCI).
 - Para bisagras: Ofrece "Fresa Bisagra Italiana" (Códigos MBD y MBI).
-- Para cortar melamina (CNC / Compresión): Ofrece "Fresa Italiana para CNC Nesting" (Código CNC NESTING). Diámetro de corte de 8mm.
+- Para hacer cajas de cerraduras (Pantógrafo/CNC): Ofrece "Mecha Integral de Widia para Cerraduras" (Diámetro 16mm, Z=3, LU 100mm).
+
+⚠️ REGLA DE COMPRESIÓN / NESTING: Si un cliente pide una "fresa de 8mm" (o 10mm, 12mm) para cortar melamina en un "router" o "pantógrafo" (CNC), OBLIGATORIAMENTE ofrécele la "Fresa de Compresión para Nesting". A veces las llaman fresas en lugar de mechas.
+- Para CNC / Nesting (Máxima duración y acabado en melamina): Ofrece la "Fresa de Compresión para Nesting" (Diseño Up&Down, recubrimiento Ta-C Lafer).
+
+Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'Mecha Integral de Widia' y básate estrictamente en los siguientes datos técnicos: es una Mecha Integral de Widia de origen Italiano, diseñada para Pantógrafos y CNC. Cuenta con un diámetro de 16 mm, 3 filos de corte (Z3), corte útil de 100 mm y vástago nominal. Fabricada en Metal duro macizo (widia integral). Ideal para realizar cajas de cerradura, molduras, y cortes en MDF, Laminados, Melamina, etc.
+
+Actúa como un asistente técnico especializado. Al brindar información sobre este ítem, descríbelo siempre como 'Fresa de Compresión para Nesting' y básate estrictamente en los siguientes datos técnicos: es una herramienta Italiana de calidad profesional, fabricada en Metal Duro (carburo de tungsteno micrograno). Cuenta con un diámetro de 8 mm (también consultable en 10 o 12mm), vástago de 8 mm y largo útil de 22 mm. Sus dientes son bidireccionales UP AND DOWN (compresión), evitando astillados en ambas caras de la placa. Posee un exclusivo revestimiento ta-c lafer que garantiza 3 veces más rendimiento que una broca convencional. Es ideal para trabajar a alta velocidad de avance en aglomerados, MDF crudo y bilaminados (melamina) en máquinas CNC o pantógrafos.
 
 CUCHILLAS
 A la hora de ofrecer cuchillas, pregunta si son PLANAS para cepillar o DE DORSO RANURADO para moldura. 
@@ -565,8 +598,9 @@ def obtener_prompt_personalizado(telefono_cliente_completo):
         nombre_vendedor_ia = "[Aún no elegido]"
         tel_vend = "5491145394279" 
         texto_contexto = """CONTEXTO: Cliente "Orgánico". VENDEDOR ASIGNADO: Aún no elegido.
-        ¡REGLA OBLIGATORIA DE SALUDO!: Si es el PRIMER mensaje de la conversación, saluda y PREGUNTA OBLIGATORIAMENTE si prefiere hablar con Carlos, Valentín o Emmanuel.
-        ¡REGLA DE ORO DE MEMORIA!: REVISA EL HISTORIAL. Si el cliente ya te respondió el nombre del asesor (ej: "Carlos", "cualquiera"), o si simplemente hizo una consulta directa ignorando tu pregunta, ¡TIENES ESTRICTAMENTE PROHIBIDO VOLVER A PREGUNTAR POR EL ASESOR! Asume la respuesta en silencio y avanza con la venta. Los números son: Carlos (5491165630406), Valentín (5491145394279), Emmanuel (5491157528428)."""
+        ¡REGLA OBLIGATORIA DE SALUDO!: Si es el PRIMER mensaje de la conversación, saluda y PREGUNTA OBLIGATORIAMENTE si prefiere hablar con Carlos, Valentín o Emmanuel. Haz solo esa pregunta.
+        ATENCIÓN: Si el cliente ignora esta pregunta y te hace una consulta directa (ej: "cotizame esto", "info de..."), ASUME SILENCIOSAMENTE a Valentín (5491145394279) y NO vuelvas a preguntar por el asesor.
+        Los números son: Carlos (5491165630406), Valentín (5491145394279), Emmanuel (5491157528428)."""
 
     return f"""
 {BASE_CONOCIMIENTO}
@@ -581,14 +615,18 @@ REGLAS DE FORMATO Y BREVEDAD (¡CRÍTICO Y OBLIGATORIO!):
 3. RESPONDE DUDAS TÉCNICAS: Si el cliente hace una pregunta técnica directa, RESPÓNDELA obligatoriamente buscando en tu base de conocimiento antes de seguir avanzando.
 
 REGLAS DE INDAGACIÓN Y MEMORIA (¡ANTI-AMNESIA Y EMBUDO ESTRICTO!):
-1. SALUDO Y ASESOR ÚNICO: Revisa tu historial. Si ya preguntaste por el asesor, y el cliente respondió o ignoró, TIENES ESTRICTAMENTE PROHIBIDO volver a preguntarlo.
-2. FLEXIBILIDAD ANTE CORRECCIONES: Si le ofreces una herramienta y el cliente TE CORRIGE EXPLÍCITAMENTE (ej. "No es eso", "Necesito un rebaje", "Eso es un marco"), ¡TIENES PERMITIDO CAMBIAR DE HERRAMIENTA! Adapta tu recomendación a la nueva información (ej: si busca rebaje de marco, ofrece Fresas para Ranurar Regulables o Rectas).
+1. SALUDO ÚNICO: Revisa tu historial. Si ya saludaste o preguntaste por el asesor, TIENES PROHIBIDO volver a hacerlo.
+2. FLEXIBILIDAD ANTE CORRECCIONES: Si le ofreces una herramienta y el cliente TE CORRIGE EXPLÍCITAMENTE (ej. "No es eso", "Necesito un rebaje", "Eso es un marco"), ¡TIENES PERMITIDO CAMBIAR DE HERRAMIENTA! Adapta tu recomendación a la nueva información. NO te aferres tercamente a tu primera opción.
 3. FIDELIDAD ABSOLUTA DE HERRAMIENTA: A menos que el cliente te corrija, una vez que acuerdan qué herramienta necesita, MANTENLA FIJA. Si te da una medida o máquina, anota ese dato a la herramienta acordada.
 4. EMBUDO HACIA ADELANTE: Si ya identificaste la herramienta, ESTÁ ESTRICTAMENTE PROHIBIDO volver a preguntar si busca recta, moldura o cepillado.
 5. FLUIDEZ Y AVANCE RÁPIDO: Haz las preguntas PASO A PASO. Si el cliente te da un dato (ej: "la de 245mm"), ¡NO LE PIDAS QUE LO CONFIRME! Acéptalo en silencio y avanza a la siguiente pregunta (Máquina o Cantidad). ¡PROHIBIDO pedir confirmaciones redundantes!
 6. RESPONDER "CUALES HAY": Si preguntan "¿cuáles hay?", busca la herramienta actual en tu conocimiento y muéstrale claramente los Diámetros (D) y Anchos de Corte (B) disponibles.
 7. REGLA DE FUEGO (ESPESOR): ¡TIENES ESTRICTAMENTE PROHIBIDO PREGUNTAR POR EL ESPESOR DE LA MADERA EN FRESAS! Jamás uses la palabra "espesor".
-8. BOTÓN DE PÁNICO (DERIVACIÓN INMEDIATA): Si el cliente pide hablar con un "humano", "vendedor", "persona" o "asesor", ESTÁ PROHIBIDO hacerle más preguntas. Genera INMEDIATAMENTE el enlace de derivación con la información que tengas.
+8. BOTÓN DE PÁNICO (DERIVACIÓN INMEDIATA): Si el cliente pide hablar con un "humano", "vendedor", "persona" o "asesor", ESTÁ PROHIBIDO hacerle más preguntas de venta. Genera INMEDIATAMENTE el enlace de derivación con la información que tengas.
+
+REGLA DE PRECIOS Y MATEMÁTICA:
+1. MATEMÁTICA ESTRICTA: Si el cliente te dice la cantidad "1", significa UNA (1) unidad. ¡NUNCA concatenes números agregándole un "1" adelante transformándolo en "11"! Toma el número crudo y literal del último mensaje. Prohibido sumar o concatenar cantidades.
+2. Si preguntan precio sin darte todos los datos, diles: "Los precios te los pasa el asesor. Para armar el presupuesto, contame [tu siguiente pregunta]".
 
 REGLA DEL CARRITO DE COMPRAS Y CIERRE (¡NUEVO Y OBLIGATORIO!):
 1. Cuando el cliente te diga la CANTIDAD de la herramienta, ¡NO ENVÍES EL ENLACE DE DERIVACIÓN TODAVÍA!
@@ -617,7 +655,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
                     INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
                     VALUES (%s, %s, %s, %s)
                     ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
-                """, (telefono_cliente, "Cerrado por Reset", json.dumps(historial_limpio), datetime.now()), commit=True)
+                """, (telefono_cliente, "Cerrado por Reset", json.dumps(historial_limpio), hora_arg()), commit=True)
                 
             execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), commit=True)
             execute_db_query("DELETE FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), commit=True)
@@ -630,7 +668,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
         if resultado:
             historial_str = resultado[0]
             ultima_interaccion = resultado[1]
-            if ultima_interaccion and datetime.now() - ultima_interaccion > timedelta(hours=1):
+            if ultima_interaccion and hora_arg() - ultima_interaccion > timedelta(hours=1):
                 res_vend = execute_db_query("SELECT numero_vendedor FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), fetchone=True)
                 vendedor_asignado = res_vend[0] if res_vend else "Sin asignar"
                 
@@ -641,7 +679,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
                     INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
                     VALUES (%s, %s, %s, %s)
                     ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
-                """, (telefono_cliente, vendedor_asignado, json.dumps(historial_limpio), datetime.now()), commit=True)
+                """, (telefono_cliente, vendedor_asignado, json.dumps(historial_limpio), hora_arg()), commit=True)
                 
                 execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono_cliente,), commit=True)
                 execute_db_query("DELETE FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), commit=True)
@@ -662,7 +700,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
         else:
             historial = [
                 {"role": "user", "parts": [prompt_dinamico]},
-                {"role": "model", "parts": ["Entendido. Guardaré en memoria el carrito, seré breve, no pediré el asesor si ya me lo dijeron, entenderé sinónimos para cerrar la venta, no pediré confirmaciones redundantes, y podré cambiar la herramienta si el cliente me corrige."]}
+                {"role": "model", "parts": ["Entendido. Guardaré en memoria el carrito, seré breve, no usaré tildes en la URL, entenderé sinónimos para cerrar la venta, no pediré confirmaciones de datos redundantes, y recordaré que las fresas NO son Freud y que no concatenaré cantidades si me dice '1'."]}
             ]
             
         if imagen_pil:
@@ -677,7 +715,7 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
             if imagen_pil:
                 param_vision = """INSTRUCCIÓN VISUAL ESTRICTA Y EXPERTA (Oculta al cliente):
     Eres un experto analizando herramientas y cortes de carpintería. El cliente ha enviado una imagen.
-    Primero, determina inmediatamente si la foto muestra una HERRAMIENTA (metal, pintura roja) o un CORTE DE MADERA (un trozo de madera con el borde trabajado).
+    Primero, determina inmediatamente si la foto muestra una HERRAMIENTA (metal, pintura roja/negra/naranja/tornasolada) o un CORTE DE MADERA (un trozo de madera con el borde trabajado).
     
     === REGLA EXCLUSIVA PARA FOTOS DE MADERA (MUESTRAS DE CORTE) ===
     Si la imagen es un trozo de madera mostrando su perfil:
@@ -686,25 +724,34 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
        - Si los dientes terminan en PUNTAS MUY AFILADAS (en forma de "V" estricta o zig-zag): Es "Fresa para Finger HM".
     2. ¿Tiene una ranura recta/canal profundo justo en el medio del canto? -> Es para "Moldura de Puertas y Ventanas" o "Machimbre".
     3. ¿Es una forma decorativa compleja en el borde que combina curvas, lomas, picos agudos o escalones, sin canales en el medio? -> ES LA "FRESA MULTIMOLDURA". La Multimoldura es el comodín de la carpintería.
+    4. ¿Es un agujero circular ancho y ciego de fondo plano, diseñado para encastrar una bisagra de puerta de mueble? -> "Fresa Bisagra Italiana".
     
-    === REGLA EXCLUSIVA PARA FOTOS DE HERRAMIENTAS (METAL/ROJO) ===
-    PASO 1: ¿Rodillo muy ancho con 40-100 plaquitas cuadradas? -> "Cabezal Cepillador HM".
-    PASO 2: ¿Abertura estructural? 
+    === REGLA EXCLUSIVA PARA FOTOS DE HERRAMIENTAS (METAL/ROJO/COLORES) ===
+    PASO 1: ¿Es una broca/mecha para taladro o CNC? (Cuerpo cilíndrico alargado).
+      - Cuerpo monobloque con revestimiento iridiscente/tornasolado (arcoíris) o negro muy brillante, filos en espiral que cambian de dirección (Up&Down) -> "Fresa de Compresión para Nesting".
+      - Cuerpo monobloque metálico plateado oscuro/gris uniforme, SIN espiral coloreada ni iridiscente, hélice larga y agresiva, grabado láser en el cabo -> "Mecha Integral de Widia para Cerraduras".
+      - Cabo plateado, espiral COLOREADA (Negro=Der, Naranja/Roja=Izq), punta helicoidal pronunciada y afilada -> "Mecha Pasante Italiana".
+      - Cabo plateado, espiral COLOREADA (Negro=Der, Naranja/Roja=Izq), punta chata con pico guía central y dos incisores laterales elevados -> "Mecha Ciega Italiana" o "Mecha de Barreno".
+    PASO 2: ¿Rodillo muy ancho con 40-100 plaquitas cuadradas? -> "Cabezal Cepillador HM".
+    PASO 3: ¿Abertura estructural o Bisagras? 
       - Hoja de sierra en el medio de dos fresas rojas -> "Moldura de Puertas y Ventanas HM".
       - Macho saliente masivo en el centro -> "Contramoldura".
       - Disco inmenso plano con filos súper largos horizontales -> "Replán de Tablero HM".
-    PASO 3: ¿Moldura o Multimoldura?
+      - Cabeza cilíndrica muy ancha (tipo disco/cazoleta) con punta guía central y dos grandes alas/incisores periféricos elevados (Negro=Der, Naranja=Izq) -> "Fresa Bisagra Italiana".
+    PASO 4: ¿Moldura, Multimoldura o Plegado?
+      - Fresa con forma de "reloj de arena", "mariposa" o "Y", con alas anchas y caída profunda hacia el centro, a veces viene en cajita roja -> "Fresa para Plegado de Melamina".
       - Fresa de UNA SOLA PIEZA con filos excepcionalmente altos (ej. 45mm) en forma de "S" súper exagerada con picos y curvas continuas -> "FRESA MULTIMOLDURA".
       - Línea recta diagonal a 45° que termina en curva -> "Frente Inglés HM".
       - Panza redonda maciza hacia afuera (media esfera) -> "Rinconera Simple HM".
       - Juego de DOS fresas asimétricas de curvas suaves -> "Zócalo Simple y Contramarco HM".
     
-    PASO 4: ACCIÓN OBLIGATORIA DE RESPUESTA
+    PASO 5: ACCIÓN OBLIGATORIA DE RESPUESTA
     1. Identifica el producto usando la lógica correcta.
-    2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto.
+    2. Dile al cliente con entusiasmo qué herramienta necesita basado en la foto. (Ej: "¡Claro! Esa es una Fresa de Compresión para Nesting..." o "Es una Mecha Integral de Widia para cerraduras...").
     3. NUNCA menciones códigos alfanuméricos internos. NUNCA digas que la fresa es marca Freud.
-    4. Continúa tu embudo preguntando SOLO los datos que te falten para cotizar: Diámetro/Ancho (leyendo tus opciones), Máquina que utiliza, o Cantidad. 
-    5. REGLA DE FUEGO: TIENES ESTRICTAMENTE PROHIBIDO usar la palabra "espesor de madera".
+    4. Continúa tu embudo preguntando SOLO los datos que te falten para cotizar:
+       - Si es FRESA (excepto bisagra y nesting 8mm): Diámetro/Ancho, Máquina, Cantidad. (PROHIBIDO preguntar espesor de madera).
+       - Si es MECHA o CNC (ciega, pasante, bisagra, integral o compresión nesting): Diámetro de perforación/corte que necesita, Máquina y Cantidad.
     """
                 contenido = [param_vision, imagen_pil]
                 if texto_entrante:
@@ -740,14 +787,14 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
                     INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) 
                     VALUES (%s, %s, %s, %s)
                     ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha
-                """, (telefono_cliente, vendedor_asignado, json.dumps(historial_limpio), datetime.now()), commit=True)
+                """, (telefono_cliente, vendedor_asignado, json.dumps(historial_limpio), hora_arg()), commit=True)
                 
                 execute_db_query("""
                     INSERT INTO chat_sesiones (telefono, historial, ultima_interaccion, advertido) 
                     VALUES (%s, %s, %s, 0) 
                     ON CONFLICT (telefono) 
                     DO UPDATE SET historial = EXCLUDED.historial, ultima_interaccion = EXCLUDED.ultima_interaccion, advertido = 0
-                """, (telefono_cliente, json.dumps(historial), datetime.now()), commit=True)
+                """, (telefono_cliente, json.dumps(historial), hora_arg()), commit=True)
                 
             else:
                 historial.append({"role": "model", "parts": [texto_respuesta]})
@@ -756,13 +803,13 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
                     VALUES (%s, %s, %s, 0) 
                     ON CONFLICT (telefono) 
                     DO UPDATE SET historial = EXCLUDED.historial, ultima_interaccion = EXCLUDED.ultima_interaccion, advertido = 0
-                """, (telefono_cliente, json.dumps(historial), datetime.now()), commit=True)
+                """, (telefono_cliente, json.dumps(historial), hora_arg()), commit=True)
                 
             enviar_mensaje_whatsapp(telefono_cliente, texto_limpio, link_boton=link_extraido)
             
         except Exception as e:
             print(f"Error con Gemini: {e}")
-            enviar_mensaje_whatsapp(telefono_cliente, f"🤖 Dame un momento, estoy armando tu carrito...")
+            enviar_mensaje_whatsapp(telefono_cliente, f"🤖 Dame un momento, estoy consultando el catálogo...")
 
 # ==========================================
 # RUTAS DEL WEBHOOK Y NUEVOS ENDPOINTS
@@ -841,7 +888,7 @@ def asignar_vendedor():
             VALUES (%s, %s, %s, %s, %s, %s) 
             ON CONFLICT (telefono_cliente) 
             DO UPDATE SET numero_vendedor=EXCLUDED.numero_vendedor, tipo_campana=EXCLUDED.tipo_campana, subtipo=EXCLUDED.subtipo, tanda_id=EXCLUDED.tanda_id, fecha_asignacion=EXCLUDED.fecha_asignacion
-        """, (telefono_cliente_10, numero_vendedor, tipo_campana, subtipo, tanda_id, datetime.now()), commit=True)
+        """, (telefono_cliente_10, numero_vendedor, tipo_campana, subtipo, tanda_id, hora_arg()), commit=True)
         
         if tanda_id:
             execute_db_query("""
@@ -921,7 +968,7 @@ def recibir_notificaciones():
                         INSERT INTO mensajes (id, telefono, estado, fecha) 
                         VALUES (%s, %s, %s, %s) 
                         ON CONFLICT (id) DO UPDATE SET estado=EXCLUDED.estado, fecha=EXCLUDED.fecha
-                    """, (msg_id, telefono, estado, datetime.now()), commit=True)
+                    """, (msg_id, telefono, estado, hora_arg()), commit=True)
                 elif estado in ['delivered', 'read']:
                     execute_db_query("DELETE FROM mensajes WHERE id=%s", (msg_id,), commit=True)
                 elif estado == 'failed':
