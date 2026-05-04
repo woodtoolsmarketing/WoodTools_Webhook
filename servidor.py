@@ -19,6 +19,7 @@ import threading
 from threading import Lock
 from apscheduler.schedulers.background import BackgroundScheduler
 import unicodedata
+import time
 
 app = Flask(__name__)
 
@@ -279,20 +280,28 @@ def registrar_metrica(evento, telefono):
                 
     except Exception as e: print(f"Error métricas: {e}")
 
-def bloquear_numero_en_sheets(telefono):
+def bloquear_numero_en_sheets(telefono, max_retries=3):
     try:
         if not os.path.exists(RUTA_CREDENCIALES): return False
         gc = gspread.service_account(filename=RUTA_CREDENCIALES)
-        sh = gc.open(NOMBRE_HOJA)
         
-        for ws in sh.worksheets():
+        for intento in range(max_retries):
             try:
-                celda = ws.find(telefono)
-                if celda:
-                    ws.update_cell(celda.row, celda.col, f"0000{telefono}")
-                    return True
-            except gspread.exceptions.CellNotFound: continue
-    except Exception as e: print(f"❌ Error conectando a Sheets: {e}", flush=True)
+                sh = gc.open(NOMBRE_HOJA)
+                for ws in sh.worksheets():
+                    celda = ws.find(telefono)  # Devuelve None si no lo encuentra en versiones recientes
+                    if celda:
+                        ws.update_cell(celda.row, celda.col, f"0000{telefono}")
+                        return True
+                return False
+            except gspread.exceptions.APIError as e:
+                if e.response.status_code == 429:
+                    print(f"⚠️ Límite de API de Sheets alcanzado. Reintentando en {2 ** intento} segs...")
+                    time.sleep(2 ** intento)
+                else:
+                    raise e
+    except Exception as e: 
+        print(f"❌ Error conectando a Sheets: {e}", flush=True)
 
 # ==========================================
 # RUTINAS AISLADAS CON POOL
@@ -940,7 +949,7 @@ def asignar_vendedor():
     data = request.json
     telefono_cliente_10 = extraer_10_digitos(data.get('cliente', ''))
     numero_vendedor = limpiar_numero(data.get('vendedor_tel', ''))
-    tipo_campana = data.get('tipo_campana', 'Promociones')
+    tipo_campana = data.get('tipo_campana', 'Promiones')
     subtipo = data.get('subtipo', '')
     tanda_id = data.get('tanda_id', '')
     
