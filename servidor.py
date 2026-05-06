@@ -347,7 +347,7 @@ def revisar_rutinas_de_tiempo():
                         f"🤖 *AVISO DEL BOT AUTOMÁTICO*\n\n"
                         f"El cliente con número +{telefono} ingresó por la campaña *{campana}*, pero el chat expiró tras 1 hora de inactividad.\n\n"
                         f"💬 *Último mensaje del cliente:*\n\"{ultimo_msg_cliente}\"\n\n"
-                        f"👉 *Acción requerida:* Por favor, revisa el panel de 'Chats Abandonados' en el sistema y contactalo directamente."
+                        f"👉 *Acción requerida:* Por favor, revisa el panel de 'Chats Pendientes' en el sistema y contactalo directamente."
                     )
                     
                     if vendedor_asignado and vendedor_asignado != "Sin asignar" and vendedor_asignado != "5491145394279": 
@@ -489,6 +489,13 @@ Utilizar un tono amigable, pero sin irte por otros lados y siempre mantenerse en
 Para brindar información no utilizar información de otras marcas que no sean WoodTools, Freud o Franzoi.
 Tu labor además de informar es indagar por lo que tenes que ir preguntando de manera sutil: Qué herramienta necesita, qué materiales quiere cortar, en qué medida y cuál es la máquina que utiliza.
 
+⚠️ REGLA DE NÚMERO EQUIVOCADO / IDENTIDAD INCORRECTA: Si el cliente indica que nos equivocamos de persona, que el número es incorrecto o que es un familiar (ej. "soy el hijo", "es mi madre"):
+1. Discúlpate y pregúntale si conoce a la persona por la que preguntamos.
+2. Si te responde que NO la conoce: Despídete muy brevemente y CORTA LA CONVERSACIÓN ahí mismo. No intentes vender nada.
+3. Si te responde que SÍ la conoce: Pídele amablemente un número telefónico para contactar a esa persona.
+4. Si te facilita el número telefónico: Agradece el dato (ej: "¡Muchas gracias por el dato! Hasta luego.") y CORTA LA CONVERSACIÓN INMEDIATAMENTE generando el enlace de derivación para que el asesor vea el nuevo número. (OBLIGATORIO incluir la etiqueta [AGENDADO: Numero Equivocado - Nuevo numero: {numero_dado}]).
+5. Si no te quiere dar el número: Insiste UNA VEZ indicando que es para poder brindarle la info de la campaña. Si se vuelve a negar, desestima el contacto, despídete y corta la conversación.
+
 ⚠️ REGLA DE DESPEDIDAS Y RECHAZOS (CIERRE DEFINITIVO): Si el cliente indica que no va a comprar, que cambió de rubro, que no tiene trabajo, o dice un "gracias" final para cortar la charla:
 1. Despídete de forma EXTREMADAMENTE BREVE y empática (ej: "Entiendo, ¡te deseo mucho éxito!").
 2. TIENES ESTRICTAMENTE PROHIBIDO volver a ofrecer ayuda, pedir que te contacten en el futuro o hacer preguntas. Corta la charla ahí.
@@ -496,8 +503,12 @@ Tu labor además de informar es indagar por lo que tenes que ir preguntando de m
 
 ⚠️ REGLA DE CLIENTE OCUPADO O MANEJANDO: Si el cliente indica que está ocupado, trabajando, manejando, "en la ruta" o que no puede hablar en este momento:
 1. Dile amablemente que no hay problema y que su seguridad/tiempo es lo principal.
-2. Pregúntale exactamente qué día o a qué hora prefiere que nos comuniquemos con él.
-3. Una vez que responda indicando el momento deseado, despídete y GENERA EL ENLACE DE DERIVACIÓN INMEDIATAMENTE. Dentro del parámetro de texto del enlace, debes incluir obligatoriamente la frase "Contactar el dia [Fecha/Hora]" (por ejemplo: Contactar el dia de mañana a la tarde). Esto es crucial para que el sistema lo asigne a los chats abandonados/pendientes correctamente.
+2. Pregúntale exactamente qué día y a qué hora prefiere que nos comuniquemos con él.
+3. ⚠️ REGLA ESTRICTA DE HORARIO COMERCIAL: Nuestro horario de atención es ÚNICAMENTE de Lunes a Viernes de 8:00 a 17:00 hs. Si el cliente propone un horario fuera de este rango (ej. 18:00 hs) o un fin de semana (sábado/domingo), TIENES ESTRICTAMENTE PROHIBIDO aceptarlo. Pide disculpas, recuérdale nuestro horario (Lun-Vie 8 a 17hs) y ofrécele coordinar para un día y horario válido.
+4. Una vez que el cliente confirme un día y horario VÁLIDO, despídete amablemente y GENERA EL ENLACE DE DERIVACIÓN INMEDIATAMENTE.
+5. OBLIGATORIO: En tu último mensaje, además del enlace, DEBES incluir exactamente esta etiqueta oculta con los datos acordados (reemplazando los corchetes por los datos reales):
+[AGENDADO: Contactar el dia {Día acordado} a las {Hora acordada} al numero {NÚMERO DEL CLIENTE ACTUAL}]
+Ejemplo: [AGENDADO: Contactar el dia Lunes a las 14:30 al numero 5491140916686]
 
 ⚠️ REGLA DE QUEJAS Y MALAS EXPERIENCIAS: Si el cliente manifiesta una mala experiencia pasada (ej. mal afilado, mala atención, herramientas dañadas, frustración, enojo), TIENES ESTRICTAMENTE PROHIBIDO intentar venderle algo o preguntarle qué herramienta busca. 
 Tu único deber en ese momento es:
@@ -665,13 +676,15 @@ def obtener_prompt_personalizado(telefono_cliente_completo, modo_bot):
             nombre_vendedor_ia = "tu asesor"
             tel_vend = "5491145394279"
             
-        texto_contexto = f"""CONTEXTO DE LA CAMPAÑA: El cliente respondió a la campaña "{tipo_camp}". VENDEDOR ASIGNADO: {nombre_vendedor_ia} (Número: {tel_vend})."""
+        texto_contexto = f"""CONTEXTO DE LA CAMPAÑA: El cliente respondió a la campaña "{tipo_camp}". VENDEDOR ASIGNADO: {nombre_vendedor_ia} (Número: {tel_vend}).
+NÚMERO DEL CLIENTE ACTUAL: +{telefono_cliente_completo} (Úsalo obligatoriamente cuando debas agendar un contacto o derivar por número equivocado)."""
     else:
         nombre_vendedor_ia = "[Aún no elegido]"
         tel_vend = "5491145394279" 
-        texto_contexto = """CONTEXTO: Cliente "Orgánico". VENDEDOR ASIGNADO: Aún no elegido.
-        ¡REGLA DE SALUDO Y ASESOR!: Si es el PRIMER mensaje y solo te dicen "Hola" o su nombre, saluda y pregunta con quién prefiere hablar (Carlos, Valentín o Emmanuel).
-        ⚠️ EXCEPCIÓN CRÍTICA: Si el cliente en su primer mensaje ya te hace una consulta directa, o si responde "indistinto", "me da igual", "cualquiera" a la pregunta del asesor, RESPONDE SU CONSULTA DIRECTAMENTE, asigna a Valentín (5491145394279) EN SILENCIO y JAMÁS le preguntes con quién quiere hablar. ¡Prioriza responder la duda del cliente antes que la burocracia!"""
+        texto_contexto = f"""CONTEXTO: Cliente "Orgánico". VENDEDOR ASIGNADO: Aún no elegido.
+NÚMERO DEL CLIENTE ACTUAL: +{telefono_cliente_completo} (Úsalo obligatoriamente cuando debas agendar un contacto o derivar por número equivocado).
+¡REGLA DE SALUDO Y ASESOR!: Si es el PRIMER mensaje y solo te dicen "Hola" o su nombre, saluda y pregunta con quién prefiere hablar (Carlos, Valentín o Emmanuel).
+⚠️ EXCEPCIÓN CRÍTICA: Si el cliente en su primer mensaje ya te hace una consulta directa, o si responde "indistinto", "me da igual", "cualquiera" a la pregunta del asesor, RESPONDE SU CONSULTA DIRECTAMENTE, asigna a Valentín (5491145394279) EN SILENCIO y JAMÁS le preguntes con quién quiere hablar."""
 
     if modo_bot == "BASICO":
         reglas_modo = f"""
@@ -865,16 +878,21 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
             match = re.search(r'(https://woodtools-webhook\.onrender\.com/wa/[^\s<>]+)', texto_respuesta)
             if match:
                 raw_url = match.group(1).rstrip('.",\'')
-                texto_limpio = texto_respuesta.replace(raw_url, "").strip()
+                # Ocultamos la etiqueta [AGENDADO...] del mensaje enviado al cliente si la IA la puso junto al link
+                texto_limpio = re.sub(r'\[AGENDADO:\s*.*?\]', '', texto_respuesta, flags=re.IGNORECASE).strip()
+                texto_limpio = texto_limpio.replace(raw_url, "").strip()
                 texto_limpio = texto_limpio.replace("👉", "").replace("Hacé clic en este enlace para hablar con él", "").strip()
                 
                 url_limpia = urllib.parse.unquote(raw_url)
                 url_limpia = ''.join((c for c in unicodedata.normalize('NFD', url_limpia) if unicodedata.category(c) != 'Mn'))
                 link_extraido = urllib.parse.quote(url_limpia, safe=':/?&=%')
+            else:
+                # Si no hay link pero la IA metio la etiqueta de agendado, igual se la quitamos al cliente
+                texto_limpio = re.sub(r'\[AGENDADO:\s*.*?\]', '', texto_respuesta, flags=re.IGNORECASE).strip()
             
             historial.append({"role": "user", "parts": [texto_para_historial]})
             
-            if link_extraido or "Te voy a derivar con" in texto_respuesta:
+            if link_extraido or "Te voy a derivar con" in texto_respuesta or "[AGENDADO" in texto_respuesta.upper():
                 vendedor_asignado = "Orgánico / Asignado por IA" if tanda_id_actual == "ORGANICO" else "Vendedor de Campaña"
                 
                 historial.append({"role": "model", "parts": [texto_respuesta]})
@@ -1014,36 +1032,28 @@ def recibir_notificaciones():
             
             if 'messages' in cambios:
                 mensaje = cambios['messages'][0]
-                
-                # Deduplicación: Si ya procesamos este mensaje, respondemos OK y salimos
                 msg_id = mensaje.get('id')
                 if msg_id:
                     if msg_id in processed_msg_ids:
                         return jsonify({"status": "ok"}), 200
                     processed_msg_ids.add(msg_id)
-                    # Limpiamos para que la RAM no se llene si llegan miles de mensajes
                     if len(processed_msg_ids) > 1000:
                         processed_msg_ids.clear()
 
-                # REVISAR SI EL MENSAJE ES TEXTO O IMAGEN
                 if mensaje['type'] == 'text': 
                     telefono_cliente = limpiar_numero(mensaje['from'])
                     texto_cliente = mensaje['text']['body']
                     print(f"📩 MENSAJE de {telefono_cliente}: {texto_cliente}", flush=True)
                     registrar_metrica('responded', telefono_cliente) 
-                    
-                    # PROCESAR EN SEGUNDO PLANO PARA EVITAR DEMORAS EN EL WEBHOOK
                     threading.Thread(target=procesar_mensaje_con_gemini, args=(telefono_cliente, texto_cliente)).start()
                 
                 elif mensaje['type'] == 'image':
                     telefono_cliente = limpiar_numero(mensaje['from'])
                     media_id = mensaje['image']['id']
                     texto_cliente = mensaje['image'].get('caption', '') 
-                    
                     print(f"📸 IMAGEN de {telefono_cliente} - Descargando para análisis...", flush=True)
                     registrar_metrica('responded', telefono_cliente)
                     
-                    # FUNCION EN SEGUNDO PLANO PARA IMAGENES
                     def procesar_imagen_bg(tel, txt, m_id):
                         img_pil = descargar_imagen_whatsapp(m_id)
                         if img_pil:
@@ -1057,7 +1067,6 @@ def recibir_notificaciones():
                 estado = cambios['statuses'][0]['status'] 
                 telefono = limpiar_numero(cambios['statuses'][0]['recipient_id'])
                 msg_id = cambios['statuses'][0]['id']
-                
                 registrar_metrica(estado, telefono) 
                 
                 if estado == 'sent':
@@ -1080,7 +1089,6 @@ def obtener_metricas():
     try:
         filas = execute_db_query("SELECT tanda_id, entregados, leidos, respondidos, derivados FROM metricas_campanas", fetchall=True)
         if filas is None: return jsonify({}), 200
-
         datos_nube = {}
         for fila in filas:
             datos_nube[fila[0]] = {
@@ -1098,7 +1106,6 @@ def obtener_tracking_general():
     try:
         filas = execute_db_query("SELECT tanda_id, telefono, evento FROM tracking_metricas", fetchall=True)
         if filas is None: return jsonify({}), 200
-
         datos_tracking = {}
         for tanda_id, telefono, evento in filas:
             if tanda_id not in datos_tracking:
@@ -1107,7 +1114,6 @@ def obtener_tracking_general():
             evento_actual = datos_tracking[tanda_id].get(telefono, 'sent')
             if jerarquia.get(evento, 0) > jerarquia.get(evento_actual, 0):
                 datos_tracking[tanda_id][telefono] = evento
-
         return jsonify(datos_tracking), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1117,7 +1123,6 @@ def obtener_derivados():
     try:
         filas = execute_db_query("SELECT telefono, vendedor, historial, fecha FROM chats_derivados ORDER BY fecha DESC", fetchall=True)
         if filas is None: return jsonify([]), 200
-        
         datos = [{"telefono": f[0], "vendedor": f[1], "historial": json.loads(f[2]), "fecha": f[3].strftime("%Y-%m-%d %H:%M:%S")} for f in filas]
         return jsonify(datos), 200
     except Exception as e:
