@@ -332,7 +332,8 @@ MANUAL_VENTAS = {
 
     "fresas_y_mechas": """REGLAS PARA VENDER FRESAS Y MECHAS:
 - Marcas: WoodTools, Italiana o Franzoi. ¡NUNCA digas que una fresa es Freud!
-- CNC/Routers (Melamina): Ofrecer Fresa de Compresión o Mecha Integral.
+- MATERIALES: TODAS las fresas cortan MADERA por defecto. NO preguntes el material a menos que el cliente pida una "Fresa Recta de 6 dientes" (única que corta melamina además de madera) o si usa máquina CNC.
+- CNC/Routers (Melamina/MDF): Ofrecer Fresa de Compresión o Mecha Integral.
 - Fresa de Compresión: NO pidas medidas abiertas. Ofrecer directamente 8mm, 10mm o 12mm.
 - Eje central (Fresas): Vienen de 40mm. Si la máquina tiene menos (ej 30mm), ofrecer Buje. Si tiene más (50mm), se manda a alesar a medida (No ofrecer buje).
 - Prohibido preguntar: "profundidad" o "espesor de la madera" para fresas. Solo importa el Diámetro exterior y el Ancho de corte.""",
@@ -409,6 +410,7 @@ Si ya preguntan algo directo o dicen "indistinto", responde directo y asigna a V
 MODO BÁSICO (Recepcionista):
 - Respuestas MUY cortas (1 o 2 renglones).
 - Indagación rápida: ¿Qué herramienta, máquina o material?
+- NUNCA repitas el saludo ni avises que lo comunicarás con el asesor en cada mensaje. Si ya está asignado, habla directo.
 - No envíes enlace de inmediato, pregunta si quiere otra herramienta. Si dice no, genera enlace.
 ENLACE (NO CORTAR): {url_base_derivacion}[TEL_ASESOR]?text=Hola,%20necesito%20info%20de:%0A-%20[Herramienta]%20para%20[Maquina]
 """
@@ -416,6 +418,7 @@ ENLACE (NO CORTAR): {url_base_derivacion}[TEL_ASESOR]?text=Hola,%20necesito%20in
         reglas_modo = f"""
 MODO INTELIGENTE (Asesor):
 - Armarás un carrito de compras. Mantén las respuestas fluidas.
+- NUNCA repitas el saludo ni avises que lo comunicarás con el asesor en cada mensaje. Si ya está asignado, habla directo.
 - Si el cliente da un dato (ej. madera 4 pulgadas), conviértelo a mm y no vuelvas a preguntar.
 - Muestra los Diámetros y Anchos disponibles.
 - Antes de dar el enlace, pregunta si quiere algo más. Si cierra, genera enlace.
@@ -464,10 +467,26 @@ def procesar_mensaje_con_gemini(telefono_cliente, texto_entrante, imagen_pil=Non
                 model_name='gemini-2.5-flash',
                 tools=[consultar_catalogo, consultar_manual_de_ventas]
             )
-            chat = model.start_chat(history=historial[:-1])
+            chat = model.start_chat(
+                history=historial[:-1],
+                enable_automatic_function_calling=True
+            )
             
             if imagen_pil:
-                param_vision = """Analiza la herramienta y dile al cliente qué es. Si es trozo de madera con cortes a 90° es Fresa Bisagra/Machimbre. Si son dientes, es Fresa Finger. No des códigos internos."""
+                param_vision = """INSTRUCCIÓN VISUAL ESTRICTA:
+Eres experto analizando herramientas. El cliente envió una imagen.
+=== SI ES MADERA (Muestra de corte) ===
+- Cortes rectos/90° o machimbre: Fresa Bisagra o Machimbre.
+- Dientes en V agudos: Fresa Finger.
+- Dientes planos/chatos: Fresa Ensamble Cónico.
+- Curvas decorativas complejas sin canal central: Fresa Multimoldura.
+=== SI ES METAL (Herramienta) ===
+- Rodillo con plaquitas cuadradas: Cabezal Cepillador.
+- Fresa de curvas continuas y exageradas: Fresa Multimoldura.
+- Broca tornasolada/arcoíris: Fresa Compresión (Nesting).
+- Mecha espiral coloreada (naranja/negro): Mecha Ciega o Pasante.
+
+Identifica la herramienta y ofrécela con entusiasmo. Usa las herramientas de catálogo si necesitas datos. NUNCA des códigos internos."""
                 respuesta = chat.send_message([param_vision, imagen_pil, texto_entrante or ""])
             else:
                 respuesta = chat.send_message(texto_entrante)
