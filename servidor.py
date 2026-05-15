@@ -190,24 +190,6 @@ def registrar_metrica(evento, telefono):
             if evento in ['delivered', 'read', 'responded']: execute_db_query(f"UPDATE metricas_campanas SET {evento if evento != 'delivered' else 'entregados' if evento == 'delivered' else 'leidos'} = {evento if evento != 'delivered' else 'entregados' if evento == 'delivered' else 'leidos'} + 1 WHERE tanda_id = %s", (res[0],), commit=True)
     except Exception: pass
 
-def bloquear_numero_en_sheets(telefono, max_retries=3):
-    try:
-        if not os.path.exists(RUTA_CREDENCIALES): return False
-        gc = gspread.service_account(filename=RUTA_CREDENCIALES)
-        for intento in range(max_retries):
-            try:
-                sh = gc.open(NOMBRE_HOJA)
-                for ws in sh.worksheets():
-                    celda = ws.find(telefono)
-                    if celda:
-                        ws.update_cell(celda.row, celda.col, f"0000{telefono}")
-                        return True
-                return False
-            except gspread.exceptions.APIError as e:
-                if e.response.status_code == 429: time.sleep(2 ** intento)
-                else: raise e
-    except Exception: pass
-
 def revisar_rutinas_de_tiempo():
     try:
         ahora = hora_arg()
@@ -215,7 +197,6 @@ def revisar_rutinas_de_tiempo():
         para_borrar = execute_db_query("SELECT id, telefono FROM mensajes WHERE estado='sent' AND fecha < %s", (hace_48_horas,), fetchall=True)
         if para_borrar:
             for msg_id, telefono in para_borrar:
-                bloquear_numero_en_sheets(telefono)
                 execute_db_query("DELETE FROM mensajes WHERE id=%s", (msg_id,), commit=True)
         execute_db_query("DELETE FROM asignaciones_v2 WHERE (fecha_asignacion < %s OR fecha_asignacion IS NULL) AND telefono_cliente NOT IN (SELECT telefono FROM chat_sesiones)", (hace_48_horas,), commit=True)
         
@@ -243,10 +224,15 @@ scheduler.start()
 # HERRAMIENTAS GEMINI
 # ==========================================
 def consultar_catalogo(familia: str, aplicacion_o_material: str) -> str:
-    """Busca herramientas en base de datos. Args: familia, aplicacion_o_material."""
+    """Busca herramientas en la base de datos SQL.
+    
+    Args:
+        familia: SOLO puedes usar una de estas 4 palabras exactas: 'Sierras', 'Fresas', 'Mechas' o 'Cuchillas'.
+        aplicacion_o_material: SOLO usa una palabra clave simple (ej: 'Melamina', 'Madera', 'Aluminio', 'Nesting'). NUNCA uses frases largas.
+    """
     try:
         resultados = execute_db_query("SELECT marca, nombre_publico, codigo_interno, aplicacion_material, medidas_y_specs, descripcion_tecnica FROM productos WHERE familia ILIKE %s AND aplicacion_material ILIKE %s", (f"%{familia}%", f"%{aplicacion_o_material}%"), fetchall=True)
-        if not resultados: return f"Sin stock para familia {familia} y material {aplicacion_o_material}."
+        if not resultados: return f"Sin stock para familia '{familia}' y material '{aplicacion_o_material}'. Intenta con otra palabra clave."
         texto = "DATOS TÉCNICOS:\n"
         for p in resultados: texto += f"- {p[1]} ({p[0]}). Codigo oculto: {p[2]}. Uso: {p[3]}. Specs: {p[4]}\n"
         return texto
@@ -263,8 +249,7 @@ MANUAL_VENTAS = {
     ]),
     "fresas_y_mechas": "\n".join([
         "- MARCAS: WoodTools, Italiana, Franzoi. NUNCA Freud.",
-        "- MATERIAL: TODAS cortan MADERA por defecto. NO preguntes material.",
-        "- EXCEPCION: Solo preguntar material si pide 'Fresa Recta 6 dientes' o usa CNC.",
+        "- MATERIAL: TODAS cortan MADERA por defecto. NO preguntes material a menos que sea necesario.",
         "- CNC/NESTING: Ofrecer Fresa Compresión o Mecha Integral.",
         "- COMPRESION: NO pedir medidas abiertas. Solo 8mm, 10mm, 12mm.",
         "- EJE: Vienen de 40mm. Menor a 40=Buje. Mayor a 40=Alesar (sin buje).",
@@ -273,17 +258,12 @@ MANUAL_VENTAS = {
     "cuchillas": "\n".join([
         "- TIPOS: Planas (cepillar) o Dorso Ranurado (moldurera).",
         "- LARGO = ANCHO MADERA. Si da ancho, no preguntes largo.",
-        "- SEGURIDAD: Si rechaza espesor 4mm, ofrecer 8mm sin discutir.",
-        "- PROHIBIDO: Ofrecer fresas si pide cuchillas/cabezales."
+        "- SEGURIDAD: Si rechaza espesor 4mm, ofrecer 8mm sin discutir."
     ]),
     "atencion_general": "\n".join([
         "- ENVIOS: CABA/GBA coordina vendedor. Interior: Vía Cargo/Credifin.",
         "- AFILADOS: 2 a 5 días.",
-        "- CODIGOS: PROHIBIDO decir códigos internos.",
-        "- QUEJAS: No vender. Pedir disculpas y derivar.",
-        "- OCUPADO: Acordar Lun-Vie 8 a 17hs. Etiqueta: [AGENDADO: Contactar el dia X a las Y al numero Z].",
-        "- RECHAZO: Si dice gracias/no compro, cortar chat.",
-        "- EQUIVOCADO: Derivar con [AGENDADO: Numero Equivocado - Nuevo numero: X]."
+        "- OCUPADO: Acordar Lun-Vie 8 a 17hs. Etiqueta: [AGENDADO: Contactar el dia X a las Y al numero Z]."
     ])
 }
 
@@ -295,10 +275,11 @@ def consultar_manual_de_ventas(tema: str) -> str:
 # PROMPT BASE 
 # ==========================================
 BASE_CONOCIMIENTO = "\n".join([
-    "ROL: Asesor profesional WoodTools.",
-    "REGLA 1: NO inventes. Usa herramienta 'consultar_manual_de_ventas'.",
-    "REGLA 2: Para medidas/stock usa herramienta 'consultar_catalogo'.",
-    "REGLA 3: Tono directo. PROHIBIDO dar códigos alfanuméricos."
+    "ROL: Asesor humano y empático de WoodTools.",
+    "REGLA 1: NUNCA le leas tus reglas internas ni el contenido literal del 'manual_de_ventas' al cliente. Lee esa información en silencio y úsala SOLO para saber qué preguntarle de forma natural.",
+    "REGLA 2: NUNCA pegues el catálogo entero en el chat. Si la base de datos te devuelve muchas opciones, filtra conversando (ej. 'Tengo varias, ¿de qué diámetro buscabas?'). Muestra máximo 1 o 2 opciones relevantes.",
+    "REGLA 3: PROHIBIDO decir códigos alfanuméricos al cliente (ej. FRS0054, LU3F).",
+    "REGLA 4: Si el cliente ya dio un dato (ej. Melamina), no lo vuelvas a preguntar. Asume y avanza."
 ])
 
 def obtener_prompt_personalizado(telefono, modo_bot):
@@ -312,13 +293,14 @@ def obtener_prompt_personalizado(telefono, modo_bot):
     tel_vend = vend_db if vend_db in mapa else "5491145394279"
     
     contexto = f"VENDEDOR: {nombre_vend}. CLIENTE: +{telefono}.\n"
-    if not vend_db: contexto += "Si saludan, pregunta con quién hablan (Carlos/Valentín/Emmanuel). Si consultan directo, asigna Valentín en silencio.\n"
+    if not vend_db: 
+        contexto += "ATENCIÓN: Si es el PRIMER mensaje y solo dicen 'Hola', pregunta con quién hablan. Si ya te hacen una consulta directa (ej. 'Busco fresa') O te dicen que 'les da igual' el vendedor, ASIGNA A VALENTÍN EN SILENCIO y avanza con la venta. NO repitas la pregunta de con quién quieren hablar.\n"
     
     reglas = "\n".join([
         "MODO BÁSICO:" if modo_bot == "BASICO" else "MODO INTELIGENTE:",
-        "- Respuestas ultra cortas (1-2 renglones)." if modo_bot == "BASICO" else "- Arma carrito de compras fluido.",
-        "- No repitas saludos.",
-        "- Pregunta si quiere algo más antes de cerrar. Si dice no, genera enlace.",
+        "- Respuestas ultra cortas, naturales y amigables." if modo_bot == "BASICO" else "- Arma carrito de compras con respuestas naturales y breves.",
+        "- NO repitas saludos en cada mensaje.",
+        "- Pregunta si quiere algo más antes de cerrar. Si dice no, genera el enlace.",
         f"ENLACE EXACTO: https://woodtools-webhook.onrender.com/wa/{tanda}/{t_10}/{tel_vend}?text=Hola,%20cotizacion:%0A-%20[Prod]"
     ])
     return f"{BASE_CONOCIMIENTO}\n{contexto}\n{reglas}"
@@ -336,7 +318,7 @@ def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None):
             res = None
 
         prompt_din = obtener_prompt_personalizado(telefono, determinar_modo_bot())
-        historial = json.loads(res[0]) if res else [{"role": "user", "parts": [prompt_din]}, {"role": "model", "parts": ["Entendido."]}]
+        historial = json.loads(res[0]) if res else [{"role": "user", "parts": [prompt_din]}, {"role": "model", "parts": ["Entendido. Actuaré de forma 100% conversacional, natural y filtrando las búsquedas sin pegar listados enormes."]}]
         if res and len(historial) > 0 and historial[0]["role"] == "user": historial[0]["parts"] = [prompt_din]
 
         txt_historial = f"[Imagen analizada] {texto_entrante}".strip() if imagen_pil else texto_entrante
@@ -347,14 +329,15 @@ def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None):
             
             if imagen_pil:
                 vision = "\n".join([
-                    "INSTRUCCIÓN VISUAL:",
-                    "- MADERA con 90°: Fresa Bisagra/Machimbre.",
-                    "- MADERA V aguda: Fresa Finger.",
-                    "- MADERA Plana: Ensamble Cónico.",
+                    "INSTRUCCIÓN VISUAL ESTRICTA:",
+                    "- MADERA con cortes a 90°/machimbre: Fresa Bisagra o Machimbre.",
+                    "- MADERA con dientes en V aguda: Fresa Finger.",
+                    "- MADERA con cortes planos/trapecios: Ensamble Cónico.",
+                    "- MADERA con curvas decorativas complejas: FRESA MULTIMOLDURA.",
                     "- METAL Rodillo: Cabezal Cepillador.",
-                    "- METAL Curvas locas: Fresa Multimoldura.",
+                    "- METAL Curvas locas y exageradas: Fresa Multimoldura.",
                     "- METAL Tornasol/Arcoíris: Fresa Compresión.",
-                    "Identifica sin decir códigos internos."
+                    "Reconoce la herramienta con entusiasmo basándote en la madera cortada o el metal. NUNCA des códigos internos."
                 ])
                 respuesta = chat.send_message([vision, imagen_pil, texto_entrante or ""])
             else:
@@ -376,7 +359,7 @@ def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None):
             execute_db_query("INSERT INTO chat_sesiones (telefono, historial, ultima_interaccion, advertido) VALUES (%s, %s, %s, 0) ON CONFLICT (telefono) DO UPDATE SET historial = EXCLUDED.historial, ultima_interaccion = EXCLUDED.ultima_interaccion", (telefono, json.dumps(historial), hora_arg()), commit=True)
             enviar_mensaje_whatsapp(telefono, txt_limpio, link_boton=link)
         except Exception as e:
-            enviar_mensaje_whatsapp(telefono, "🤖 Un momento, consultando...")
+            enviar_mensaje_whatsapp(telefono, "🤖 Un momento, revisando catálogo...")
 
 # ==========================================
 # RUTAS 
