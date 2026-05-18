@@ -385,15 +385,39 @@ def recib():
         try:
             for entry in cuerpo['entry']:
                 for change in entry['changes']:
+                    
+                    # 1. MANEJAR MENSAJES ENTRANTES
                     if 'messages' in change['value']:
                         m = change['value']['messages'][0]
-                        if m.get('id') in processed_msg_ids: return jsonify({"status": "ok"}), 200
+                        if m.get('id') in processed_msg_ids: 
+                            return jsonify({"status": "ok"}), 200
                         processed_msg_ids.add(m.get('id'))
-                        if len(processed_msg_ids) > 1000: processed_msg_ids.clear()
+                        if len(processed_msg_ids) > 1000: 
+                            processed_msg_ids.clear()
+                        
                         tel = limpiar_numero(m['from'])
-                        if m['type'] == 'text': threading.Thread(target=procesar_mensaje_con_gemini, args=(tel, m['text']['body'])).start()
-                        elif m['type'] == 'image': threading.Thread(target=lambda: procesar_mensaje_con_gemini(tel, m['image'].get('caption', ''), descargar_imagen_whatsapp(m['image']['id']))).start()
-        except Exception: pass
+                        
+                        # Registramos que el cliente respondió
+                        registrar_metrica('responded', tel)
+
+                        if m['type'] == 'text': 
+                            threading.Thread(target=procesar_mensaje_con_gemini, args=(tel, m['text']['body'])).start()
+                        elif m['type'] == 'image': 
+                            threading.Thread(target=lambda: procesar_mensaje_con_gemini(tel, m['image'].get('caption', ''), descargar_imagen_whatsapp(m['image']['id']))).start()
+                    
+                    # 2. MANEJAR ESTADOS DE LECTURA Y ENTREGA
+                    elif 'statuses' in change['value']:
+                        estado = change['value']['statuses'][0]
+                        tel = limpiar_numero(estado['recipient_id'])
+                        tipo_estado = estado['status'] # Puede ser 'sent', 'delivered', 'read'
+                        
+                        if tipo_estado in ['delivered', 'read']:
+                            registrar_metrica(tipo_estado, tel)
+
+        except Exception as e:
+            print(f"Error procesando el webhook: {e}")
+            pass
+            
     return jsonify({"status": "ok"}), 200
 
 if __name__ == '__main__': app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
