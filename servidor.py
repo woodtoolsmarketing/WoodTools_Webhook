@@ -457,4 +457,173 @@ def recib():
             
     return jsonify({"status": "ok"}), 200
 
+# ==========================================
+# ENDPOINTS PARA LA APP DE ESCRITORIO
+# ==========================================
+
+@app.route('/derivados', methods=['GET'])
+def obtener_derivados():
+    """
+    Devuelve todos los chats derivados almacenados en la tabla chats_derivados.
+    La app de escritorio llama a GET /derivados para cargar la lista de clientes pendientes.
+    """
+    try:
+        rows = execute_db_query(
+            "SELECT telefono, vendedor, historial, fecha FROM chats_derivados ORDER BY fecha DESC",
+            fetchall=True
+        )
+        if not rows:
+            return jsonify([]), 200
+
+        resultado = []
+        for telefono, vendedor, historial_str, fecha in rows:
+            try:
+                historial = json.loads(historial_str) if historial_str else []
+            except Exception:
+                historial = []
+            resultado.append({
+                "telefono": telefono,
+                "vendedor": vendedor,
+                "historial": historial,
+                "fecha": str(fecha) if fecha else ""
+            })
+        return jsonify(resultado), 200
+    except Exception as e:
+        print(f"Error en GET /derivados: {e}")
+        return jsonify([]), 500
+
+
+@app.route('/derivados/<telefono>', methods=['DELETE'])
+def eliminar_derivado(telefono):
+    """
+    Elimina un chat derivado de la tabla chats_derivados.
+    La app de escritorio llama a DELETE /derivados/<tel> cuando marca un chat como resuelto.
+    """
+    try:
+        tel_limpio = limpiar_numero(telefono)
+        execute_db_query(
+            "DELETE FROM chats_derivados WHERE telefono = %s",
+            (tel_limpio,), commit=True
+        )
+        return jsonify({"status": "ok", "telefono": tel_limpio}), 200
+    except Exception as e:
+        print(f"Error en DELETE /derivados/{telefono}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/metricas', methods=['GET'])
+def obtener_metricas():
+    """
+    Devuelve las métricas de todas las campañas agrupadas por tanda_id.
+    La app de escritorio llama a GET /metricas para mostrar el panel de rendimiento.
+    """
+    try:
+        rows = execute_db_query(
+            "SELECT tanda_id, entregados, leidos, respondidos, derivados FROM metricas_campanas",
+            fetchall=True
+        )
+        if not rows:
+            return jsonify({}), 200
+
+        resultado = {}
+        for tanda_id, entregados, leidos, respondidos, derivados in rows:
+            resultado[tanda_id] = {
+                "entregados":  entregados  or 0,
+                "leidos":      leidos      or 0,
+                "respondidos": respondidos or 0,
+                "derivados":   derivados   or 0,
+            }
+        return jsonify(resultado), 200
+    except Exception as e:
+        print(f"Error en GET /metricas: {e}")
+        return jsonify({}), 500
+
+
+@app.route('/tracking_general', methods=['GET'])
+def obtener_tracking_general():
+    """
+    Devuelve el tracking detallado por tanda y teléfono.
+    La app de escritorio lo usa para enriquecer el reporte Excel con el estado real de cada mensaje.
+    Formato de respuesta: { tanda_id: { telefono_10_digitos: ultimo_evento } }
+    """
+    try:
+        rows = execute_db_query(
+            "SELECT tanda_id, telefono, evento FROM tracking_metricas ORDER BY tanda_id, telefono",
+            fetchall=True
+        )
+        if not rows:
+            return jsonify({}), 200
+
+        # Prioridad de eventos para elegir el "mejor" estado si hay varios
+        prioridad = {'derivado': 4, 'responded': 3, 'read': 2, 'delivered': 1}
+
+        resultado = {}
+        for tanda_id, telefono, evento in rows:
+            if tanda_id not in resultado:
+                resultado[tanda_id] = {}
+            tel_10 = telefono[-10:] if len(telefono) >= 10 else telefono
+            evento_actual = resultado[tanda_id].get(tel_10)
+            # Solo reemplazamos si el nuevo evento tiene mayor prioridad
+            if prioridad.get(evento, 0) > prioridad.get(evento_actual, 0):
+                resultado[tanda_id][tel_10] = evento
+
+        return jsonify(resultado), 200
+    except Exception as e:
+        print(f"Error en GET /tracking_general: {e}")
+        return jsonify({}), 500
+
+
+@app.route('/asignar_vendedor', methods=['POST'])
+def asignar_vendedor():
+    """
+    Registra la asignación de un vendedor a un cliente para una tanda específica.
+    La app de escritorio llama a este endpoint antes de cada envío de campaña.
+    """
+    try:
+        datos = request.get_json()
+        if not datos:
+            return jsonify({"error": "Sin datos"}), 400
+
+        cliente_tel   = limpiar_numero(datos.get('cliente', ''))
+        vendedor_tel  = limpiar_numero(datos.get('vendedor_tel', ''))
+        tipo_campana  = datos.get('tipo_campana', '')
+        subtipo       = datos.get('subtipo', '')
+        tanda_id      = datos.get('tanda_id', '')
+
+        if not cliente_tel:
+            return jsonify({"error": "Teléfono de cliente vacío"}), 400
+
+        tel_10 = extraer_10_digitos(cliente_tel)
+
+        execute_db_query(
+            """
+            INSERT INTO asignaciones_v2 (telefono_cliente, numero_vendedor, tipo_campana, subtipo, tanda_id, fecha_asignacion)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (telefono_cliente) DO UPDATE
+                SET numero_vendedor  = EXCLUDED.numero_vendedor,
+                    tipo_campana     = EXCLUDED.tipo_campana,
+                    subtipo          = EXCLUDED.subtipo,
+                    tanda_id         = EXCLUDED.tanda_id,
+                    fecha_asignacion = EXCLUDED.fecha_asignacion
+            """,
+            (tel_10, vendedor_tel, tipo_campana, subtipo, tanda_id, hora_arg()),
+            commit=True
+        )
+
+        # Aseguramos que exista una fila en metricas_campanas para esta tanda
+        execute_db_query(
+            """
+            INSERT INTO metricas_campanas (tanda_id, entregados, leidos, respondidos, derivados)
+            VALUES (%s, 0, 0, 0, 0)
+            ON CONFLICT (tanda_id) DO NOTHING
+            """,
+            (tanda_id,), commit=True
+        )
+
+        return jsonify({"status": "ok", "telefono": tel_10, "tanda_id": tanda_id}), 200
+    except Exception as e:
+        print(f"Error en POST /asignar_vendedor: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == '__main__': app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
