@@ -110,6 +110,7 @@ def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=Fa
             if conn:
                 conn.rollback()
                 db_pool.putconn(conn)
+            print(f"⚠️ Error SQL oculto: {e}") # <-- Esto te avisará en los logs de Render si hay otro error
             return None
 
 def init_db():
@@ -181,14 +182,37 @@ def descargar_imagen_whatsapp(media_id):
         return None
     except Exception: return None
 
+# ==========================================
+# REGISTRO DE MÉTRICAS CORREGIDO
+# ==========================================
 def registrar_metrica(evento, telefono):
     try:
         tel_10 = extraer_10_digitos(telefono)
         res = execute_db_query("SELECT tanda_id FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), fetchone=True)
-        if res and res[0]:
-            execute_db_query("INSERT INTO tracking_metricas (tanda_id, telefono, evento) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING", (res[0], tel_10, evento), commit=True)
-            if evento in ['delivered', 'read', 'responded']: execute_db_query(f"UPDATE metricas_campanas SET {evento if evento != 'delivered' else 'entregados' if evento == 'delivered' else 'leidos'} = {evento if evento != 'delivered' else 'entregados' if evento == 'delivered' else 'leidos'} + 1 WHERE tanda_id = %s", (res[0],), commit=True)
-    except Exception: pass
+        
+        # Si existe en asignaciones usamos su tanda, si no, lo mandamos a ORGANICO
+        tanda_id = res[0] if (res and res[0]) else 'ORGANICO'
+        
+        # Traducimos el evento en inglés de Meta a la columna exacta de SQL
+        mapa_columnas = {
+            'delivered': 'entregados',
+            'read': 'leidos',
+            'responded': 'respondidos'
+        }
+        
+        columna = mapa_columnas.get(evento)
+        
+        if columna:
+            # 1. Intentamos registrar el evento para este usuario en particular (evita duplicados con DO NOTHING)
+            filas_afectadas = execute_db_query("INSERT INTO tracking_metricas (tanda_id, telefono, evento) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING", (tanda_id, tel_10, evento), commit=True)
+            
+            # 2. SOLO si se insertó una nueva fila (no era un evento duplicado), sumamos 1 al contador global
+            if filas_afectadas and filas_afectadas > 0:
+                query_update = f"UPDATE metricas_campanas SET {columna} = {columna} + 1 WHERE tanda_id = %s"
+                execute_db_query(query_update, (tanda_id,), commit=True)
+                
+    except Exception as e:
+        print(f"Error registrando métrica '{evento}' para {telefono}: {e}")
 
 def revisar_rutinas_de_tiempo():
     try:
