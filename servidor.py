@@ -110,7 +110,6 @@ def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=Fa
             if conn:
                 conn.rollback()
                 db_pool.putconn(conn)
-            print(f"⚠️ Error SQL oculto: {e}") # <-- Esto te avisará en los logs de Render si hay otro error
             return None
 
 def init_db():
@@ -183,36 +182,43 @@ def descargar_imagen_whatsapp(media_id):
     except Exception: return None
 
 # ==========================================
-# REGISTRO DE MÉTRICAS CORREGIDO
+# REGISTRO DE MÉTRICAS (CORREGIDO)
 # ==========================================
 def registrar_metrica(evento, telefono):
+    """
+    Registra un evento de métrica para un cliente.
+    Eventos válidos: 'delivered', 'read', 'responded', 'derivado'
+    """
     try:
         tel_10 = extraer_10_digitos(telefono)
-        res = execute_db_query("SELECT tanda_id FROM asignaciones_v2 WHERE telefono_cliente = %s", (tel_10,), fetchone=True)
-        
-        # Si existe en asignaciones usamos su tanda, si no, lo mandamos a ORGANICO
-        tanda_id = res[0] if (res and res[0]) else 'ORGANICO'
-        
-        # Traducimos el evento en inglés de Meta a la columna exacta de SQL
-        mapa_columnas = {
-            'delivered': 'entregados',
-            'read': 'leidos',
-            'responded': 'respondidos'
-        }
-        
-        columna = mapa_columnas.get(evento)
-        
-        if columna:
-            # 1. Intentamos registrar el evento para este usuario en particular (evita duplicados con DO NOTHING)
-            filas_afectadas = execute_db_query("INSERT INTO tracking_metricas (tanda_id, telefono, evento) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING", (tanda_id, tel_10, evento), commit=True)
-            
-            # 2. SOLO si se insertó una nueva fila (no era un evento duplicado), sumamos 1 al contador global
-            if filas_afectadas and filas_afectadas > 0:
-                query_update = f"UPDATE metricas_campanas SET {columna} = {columna} + 1 WHERE tanda_id = %s"
-                execute_db_query(query_update, (tanda_id,), commit=True)
-                
+        res = execute_db_query(
+            "SELECT tanda_id FROM asignaciones_v2 WHERE telefono_cliente = %s",
+            (tel_10,), fetchone=True
+        )
+        if res and res[0]:
+            tanda = res[0]
+
+            # Insertar en tracking para deduplicar (ON CONFLICT DO NOTHING evita doble conteo)
+            execute_db_query(
+                "INSERT INTO tracking_metricas (tanda_id, telefono, evento) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                (tanda, tel_10, evento), commit=True
+            )
+
+            # Mapeo limpio y correcto de evento → columna SQL
+            columna_map = {
+                'delivered': 'entregados',
+                'read':      'leidos',
+                'responded': 'respondidos',
+                'derivado':  'derivados',
+            }
+            columna = columna_map.get(evento)
+            if columna:
+                execute_db_query(
+                    f"UPDATE metricas_campanas SET {columna} = {columna} + 1 WHERE tanda_id = %s",
+                    (tanda,), commit=True
+                )
     except Exception as e:
-        print(f"Error registrando métrica '{evento}' para {telefono}: {e}")
+        print(f"Error en registrar_metrica (evento={evento}, tel={telefono}): {e}")
 
 def revisar_rutinas_de_tiempo():
     try:
@@ -235,6 +241,10 @@ def revisar_rutinas_de_tiempo():
                     aviso = f"🤖 *AVISO: Chat expirado por inactividad.*\nCliente: +{telefono}\nRevisar en panel."
                     enviar_mensaje_whatsapp(vendedor if vendedor and vendedor != "Sin asignar" else "5491145394279", aviso)
                     enviar_mensaje_whatsapp(telefono, "⚠️ Cerramos esta conversación automática por inactividad. Tu asesor te contactará a la brevedad. ¡Gracias!")
+
+                    # Registrar la derivación como métrica
+                    registrar_metrica('derivado', telefono)
+
                     execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono,), commit=True)
                     execute_db_query("DELETE FROM asignaciones_v2 WHERE telefono_cliente = %s", (extraer_10_digitos(telefono),), commit=True)
                 except Exception: pass
@@ -376,6 +386,9 @@ def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None):
                 raw_url = match.group(1).rstrip('.",\'')
                 txt_limpio = txt_limpio.replace(raw_url, "").replace("👉", "").strip()
                 link = urllib.parse.quote(''.join((c for c in urllib.parse.unquote(raw_url) if unicodedata.category(c) != 'Mn')), safe=':/?&=%')
+
+                # Registrar derivación como métrica cuando se genera el enlace al vendedor
+                registrar_metrica('derivado', telefono)
                 
             historial.append({"role": "user", "parts": [txt_historial]})
             historial.append({"role": "model", "parts": [txt_res]})
@@ -433,7 +446,7 @@ def recib():
                     elif 'statuses' in change['value']:
                         estado = change['value']['statuses'][0]
                         tel = limpiar_numero(estado['recipient_id'])
-                        tipo_estado = estado['status'] # Puede ser 'sent', 'delivered', 'read'
+                        tipo_estado = estado['status']  # Puede ser 'sent', 'delivered', 'read'
                         
                         if tipo_estado in ['delivered', 'read']:
                             registrar_metrica(tipo_estado, tel)
