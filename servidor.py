@@ -324,6 +324,53 @@ def consultar_catalogo(familia: str, grupo: str = "", subtipo: str = "",
     except Exception:
         return "Error DB."
 
+
+def consultar_medidas(familia: str, diametro_mm: str = "", dientes: str = "", palabra_clave: str = "") -> str:
+    """Devuelve variantes con specs EXACTAS (diametro, dientes Z, espesor, eje) desde
+    la tabla 'variantes'. Usala cuando el cliente pide una MEDIDA puntual o pregunta
+    cuantos dientes / que medidas tiene algo. Nunca le digas el codigo al cliente.
+
+    Args:
+        familia: 'Sierras', 'Fresas', 'Mechas', 'Cuchillas', 'Diamante' o 'Cabezales'.
+        diametro_mm: diametro en mm si el cliente lo dio (ej '300'). Vacio si no.
+        dientes: cantidad de dientes Z si el cliente lo pidio (ej '96'). Vacio si no.
+        palabra_clave: uso/material para afinar (ej 'melamina', 'madera', 'aluminio'). Vacio si no.
+    """
+    try:
+        def _int(x):
+            d = ''.join(ch for ch in str(x) if ch.isdigit())
+            return int(d) if d else None
+        cond = ["familia ILIKE %s"]; p = [f"%{familia or ''}%"]
+        d = _int(diametro_mm) if diametro_mm else None
+        z = _int(dientes) if dientes else None
+        if d: cond.append("diametro_mm = %s"); p.append(d)
+        if z: cond.append("dientes_z = %s"); p.append(z)
+        if palabra_clave:
+            cond.append("(uso ILIKE %s OR titulo ILIKE %s OR spec_raw ILIKE %s)")
+            kw = f"%{palabra_clave}%"; p += [kw, kw, kw]
+        where = " AND ".join(cond)
+        q = ("SELECT titulo, marca, diametro_mm, dientes_z, espesor_mm, eje_mm, spec_raw, codigo "
+             "FROM variantes WHERE " + where +
+             " ORDER BY diametro_mm NULLS LAST, dientes_z NULLS LAST LIMIT 4")
+        rows = execute_db_query(q, tuple(p), fetchall=True)
+        if not rows:
+            return f"Sin variante exacta (familia={familia} D={diametro_mm} Z={dientes}). Pedi otra medida o deriva al asesor."
+        total = execute_db_query("SELECT count(*) FROM variantes WHERE " + where, tuple(p), fetchone=True)
+        cab = "MEDIDAS EXACTAS (deci specs al cliente, NUNCA el codigo)"
+        if total and total[0] > len(rows):
+            cab += f" [hay {total[0]}, pedi 1 dato mas para afinar]"
+        out = cab + ":\n"
+        for r in rows:
+            partes = [f"{r[0]} ({r[1]})"]
+            if r[2]: partes.append(f"D={r[2]}mm")
+            if r[3]: partes.append(f"Z={r[3]} dientes")
+            if r[4]: partes.append(f"esp={r[4]}mm")
+            if r[5]: partes.append(f"eje={r[5]}mm")
+            out += "- " + " ".join(partes) + f"  [cod_oculto:{r[7]}]\n"
+        return out
+    except Exception:
+        return "Error DB."
+
 # ==========================================
 # PROMPT BASE (corto y estable: el flujo por familia vive en SQL, no acá)
 # ==========================================
@@ -335,13 +382,14 @@ BASE_CONOCIMIENTO = "\n".join([
     "2. NUNCA pegues listados: mostra MAXIMO 1-2 productos. Si hay mas, pedi 1 dato para afinar.",
     "3. PROHIBIDO decir codigos internos (ej FRS0054).",
     "4. Si un dato ya esta en el historial, NO lo vuelvas a pedir: asumi y avanza.",
-    "5. Familias validas: Sierras, Fresas, Mechas, Cuchillas. No existe 'Diamante': si lo piden, deriva al asesor.",
+    "5. Familias validas: Sierras, Fresas, Mechas, Cuchillas, Diamante y Cabezales.",
     "",
     "COMO TRABAJAR (recuperacion just-in-time, NO inventes el flujo):",
     "- Detecta la familia: sierra/disco/cortar placa->Sierras; fresa/router/tupi/moldura/cepillar/CNC->Fresas; mecha/broca/perforar/bisagra->Mechas; cuchilla/cepillo/moldurera/chipera->Cuchillas; envios/afilado/horario->atencion.",
     "- Apenas la sepas, llama consultar_flujo(familia) UNA vez: te dice que preguntar, en que orden, las opciones y a que dato mapea cada respuesta. Segui ESE flujo, no uno tuyo.",
     "- Si es ambiguo ('hola'/'busco algo'): UNA pregunta corta y abierta. No listes las familias como menu.",
     "- Cuando tengas grupo (y subtipo/material si aplica), llama consultar_catalogo(familia, grupo, subtipo, material_corte, lado). Devuelve 1-2 opciones: ofrecelas.",
+    "- Si el cliente pide una MEDIDA puntual o pregunta cuantos dientes / que medidas tiene, llama consultar_medidas(familia, diametro_mm, dientes, palabra_clave). Trae specs EXACTAS (diametro, dientes Z, espesor, eje). NO inventes ni digas 'no tengo el dato': consultá esta tool.",
     "",
     "ANTI-REPETICION (sonar a persona, no a formulario):",
     "- Antes de preguntar revisa el historial; si el dato ya esta, no lo repitas.",
@@ -392,7 +440,7 @@ def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None):
         txt_historial = f"[Imagen analizada] {texto_entrante}".strip() if imagen_pil else texto_entrante
 
         try:
-            model = genai.GenerativeModel(model_name='gemini-2.5-flash', tools=[consultar_catalogo, consultar_flujo])
+            model = genai.GenerativeModel(model_name='gemini-2.5-flash', tools=[consultar_catalogo, consultar_flujo, consultar_medidas])
             chat = model.start_chat(history=historial[:-1], enable_automatic_function_calling=True)
             
             if imagen_pil:
