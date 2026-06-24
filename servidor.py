@@ -282,6 +282,11 @@ def consultar_flujo(familia: str) -> str:
         out.append("PREGUNTAS (en orden, una por mensaje):")
         for o, slot, preg, op, cond in preguntas:
             out.append(f" {o}) [{slot}] {preg} | opciones: {op} | aplica: {cond}")
+    lecciones = obtener_aprendizajes(fam)
+    if lecciones:
+        out.append("CORRECCIONES aprendidas para esta familia (respetalas):")
+        for lec in lecciones:
+            out.append(f" - {lec}")
     return "\n".join(out)
 
 
@@ -391,12 +396,21 @@ BASE_CONOCIMIENTO = "\n".join([
     "- Cuando tengas grupo (y subtipo/material si aplica), llama consultar_catalogo(familia, grupo, subtipo, material_corte, lado). Devuelve 1-2 opciones: ofrecelas.",
     "- Si el cliente pide una MEDIDA puntual o pregunta cuantos dientes / que medidas tiene, llama consultar_medidas(familia, diametro_mm, dientes, palabra_clave). Trae specs EXACTAS (diametro, dientes Z, espesor, eje). NO inventes ni digas 'no tengo el dato': consultá esta tool.",
     "",
-    "ANTI-REPETICION (sonar a persona, no a formulario):",
-    "- Antes de preguntar revisa el historial; si el dato ya esta, no lo repitas.",
-    "- MAXIMO 2 intentos por dato: intento 1 normal; intento 2 reformula UNA vez con 2 opciones concretas.",
-    "- Tras el 2do intento: elegi la opcion mas comun y avanza, o deriva. Prohibido pedir un dato 3 veces.",
-    "- No vuelvas a saludar en cada mensaje.",
+    "ANTI-REPETICION Y TONO HUMANO (lo MAS importante):",
+    "- Antes de CADA mensaje arma mentalmente la lista de lo que el cliente YA dijo (familia, material, medida en mm, dientes, etc.). Solo preguntá lo que FALTA; nunca pidas algo que ya este en esa lista.",
+    "- Si el cliente te da una medida o cantidad de dientes en cualquier momento, capturala YA y usala en consultar_medidas. No le vuelvas a preguntar lo que acaba de darte.",
+    "- UNA pregunta nueva por mensaje. Si no te la responde (evade, cambia de tema o pregunta otra cosa): primero respondé lo que te pregunto y, como mucho, reformula UNA sola vez con 2 opciones concretas (ej '¿de 250 o 300mm?').",
+    "- Tras 2 intentos sin definir un dato: mostrá la opcion mas comun o lo que ya tengas y AVANZA, o deriva al asesor. PROHIBIDO pedir el mismo dato 3 veces o mas.",
+    "- Saluda UNA sola vez y corto. No repitas saludos ni formulas largas de cortesia. Reconocé lo que dijo el cliente antes de seguir ('Dale, para melamina entonces...') y varia las palabras: no uses siempre la misma frase.",
+    "- NUNCA digas 'no tengo el dato' ni 'no me figura': para specs usa consultar_medidas.",
 ])
+
+def obtener_aprendizajes(ambito):
+    """Lecciones/correcciones activas para un ambito ('global' o una familia)."""
+    rows = execute_db_query(
+        "SELECT leccion FROM aprendizajes WHERE activo = true AND ambito ILIKE %s ORDER BY id",
+        (ambito,), fetchall=True)
+    return [r[0] for r in rows] if rows else []
 
 def obtener_prompt_personalizado(telefono, modo_bot):
     t_10 = extraer_10_digitos(telefono)
@@ -419,7 +433,9 @@ def obtener_prompt_personalizado(telefono, modo_bot):
         "- Pregunta si quiere algo más antes de cerrar. Si dice no, genera el enlace.",
         f"ENLACE EXACTO: https://woodtools-webhook.onrender.com/wa/{tanda}/{t_10}/{tel_vend}?text=Hola,%20cotizacion:%0A-%20[Prod]"
     ])
-    return f"{BASE_CONOCIMIENTO}\n{contexto}\n{reglas}"
+    glob = obtener_aprendizajes('global')
+    correcciones = ("\nCORRECCIONES APRENDIDAS (cumplilas SI O SI):\n- " + "\n- ".join(glob)) if glob else ""
+    return f"{BASE_CONOCIMIENTO}\n{contexto}\n{reglas}{correcciones}"
 
 def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None):
     with get_chat_lock(telefono):
@@ -706,6 +722,40 @@ def asignar_vendedor():
     except Exception as e:
         print(f"Error en POST /asignar_vendedor: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+# ==========================================
+# APRENDIZAJES / CORRECCIONES (retroalimentación del bot)
+# La app de escritorio (o un curl) puede sumar correcciones; el bot las aplica
+# en el próximo mensaje SIN redeploy (las lee de la DB en cada turno).
+# ==========================================
+@app.route('/aprendizajes', methods=['GET'])
+def listar_aprendizajes():
+    rows = execute_db_query(
+        "SELECT id, ambito, situacion, leccion, activo, fecha FROM aprendizajes ORDER BY id DESC",
+        fetchall=True) or []
+    return jsonify([{
+        "id": r[0], "ambito": r[1], "situacion": r[2], "leccion": r[3],
+        "activo": bool(r[4]), "fecha": str(r[5]) if r[5] else ""
+    } for r in rows]), 200
+
+@app.route('/aprendizaje', methods=['POST'])
+def agregar_aprendizaje():
+    d = request.get_json(silent=True) or {}
+    leccion = (d.get('leccion') or '').strip()
+    if not leccion:
+        return jsonify({"error": "Falta 'leccion'"}), 400
+    ambito = (d.get('ambito') or 'global').strip() or 'global'
+    situacion = (d.get('situacion') or '').strip()
+    execute_db_query(
+        "INSERT INTO aprendizajes (ambito, situacion, leccion, activo, fecha) VALUES (%s, %s, %s, true, %s)",
+        (ambito, situacion, leccion, hora_arg()), commit=True)
+    return jsonify({"status": "ok", "ambito": ambito}), 200
+
+@app.route('/aprendizajes/<int:aid>', methods=['DELETE'])
+def borrar_aprendizaje(aid):
+    execute_db_query("DELETE FROM aprendizajes WHERE id = %s", (aid,), commit=True)
+    return jsonify({"status": "ok", "id": aid}), 200
 
 
 if __name__ == '__main__': app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
