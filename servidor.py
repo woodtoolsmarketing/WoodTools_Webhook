@@ -307,7 +307,7 @@ def consultar_catalogo(familia: str, grupo: str = "", subtipo: str = "",
         if grupo:          cond.append("grupo = %s");          p.append(grupo)
         if subtipo:        cond.append("subtipo = %s");        p.append(subtipo)
         if material_corte: cond.append("material_corte = %s"); p.append(material_corte)
-        if lado:
+        if lado and lado.strip().lower() not in ('ambas', 'ambos', 'indistinto', 'cualquiera', 'los dos', ''):
             cond.append("(nombre_publico ~* %s OR nombre_publico ~* 'derecha e izquierda|d e i')")
             p.append(lado)
         where = " AND ".join(cond)
