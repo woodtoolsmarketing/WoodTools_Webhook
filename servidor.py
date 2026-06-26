@@ -837,6 +837,21 @@ def aprobar_aprendizaje(aid):
     execute_db_query("UPDATE aprendizajes SET estado = 'aprobado' WHERE id = %s", (aid,), commit=True)
     return jsonify({"status": "ok", "id": aid}), 200
 
+@app.route('/aprendizajes/<int:aid>/editar', methods=['POST'])
+def editar_aprendizaje(aid):
+    d = request.get_json(silent=True) or {}
+    leccion = (d.get('leccion') or '').strip()
+    if not leccion:
+        return jsonify({"error": "Falta 'leccion'"}), 400
+    ambito = (d.get('ambito') or '').strip()
+    if ambito:
+        execute_db_query("UPDATE aprendizajes SET leccion = %s, ambito = %s WHERE id = %s",
+                         (leccion, ambito, aid), commit=True)
+    else:
+        execute_db_query("UPDATE aprendizajes SET leccion = %s WHERE id = %s",
+                         (leccion, aid), commit=True)
+    return jsonify({"status": "ok", "id": aid}), 200
+
 @app.route('/aprendizajes/<int:aid>', methods=['DELETE'])
 def borrar_aprendizaje(aid):
     execute_db_query("DELETE FROM aprendizajes WHERE id = %s", (aid,), commit=True)
