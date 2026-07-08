@@ -330,16 +330,18 @@ def consultar_catalogo(familia: str, grupo: str = "", subtipo: str = "",
         return "Error DB."
 
 
-def consultar_medidas(familia: str, diametro_mm: str = "", dientes: str = "", palabra_clave: str = "") -> str:
+def consultar_medidas(familia: str, diametro_mm: str = "", dientes: str = "", palabra_clave: str = "", subgrupo: str = "") -> str:
     """Devuelve variantes con specs EXACTAS (diametro, dientes Z, espesor, eje) desde
-    la tabla 'variantes'. Usala cuando el cliente pide una MEDIDA puntual o pregunta
-    cuantos dientes / que medidas tiene algo. Nunca le digas el codigo al cliente.
+    la tabla 'variantes' (catalogo completo). Usala para encontrar el producto y para
+    responder medidas/dientes. Nunca le digas el codigo al cliente.
 
     Args:
         familia: 'Sierras', 'Fresas', 'Mechas', 'Cuchillas', 'Diamante' o 'Cabezales'.
         diametro_mm: diametro en mm si el cliente lo dio (ej '300'). Vacio si no.
         dientes: cantidad de dientes Z si el cliente lo pidio (ej '96'). Vacio si no.
-        palabra_clave: uso/material para afinar (ej 'melamina', 'madera', 'aluminio'). Vacio si no.
+        palabra_clave: material/uso (ej 'melamina', 'madera', 'aluminio', 'incisor'). Vacio si no.
+        subgrupo: SOLO sierras, para no confundir tipos: 'melamina', 'madera', 'aluminio',
+                  'incisor', 'triturador', 'multiple', 'ranurar', 'seccionadora'. Vacio si no aplica.
     """
     try:
         def _int(x):
@@ -350,7 +352,21 @@ def consultar_medidas(familia: str, diametro_mm: str = "", dientes: str = "", pa
         z = _int(dientes) if dientes else None
         if d: cond.append("diametro_mm = %s"); p.append(d)
         if z: cond.append("dientes_z = %s"); p.append(z)
-        if palabra_clave:
+        # subgrupo: explicito, o auto-detectado de la palabra clave (sierras). Asi
+        # 'melamina' trae SOLO sierras de melamina y no incisores/trituradores.
+        sg = (subgrupo or "").strip().lower()
+        pk = (palabra_clave or "").strip().lower()
+        if not sg and pk:
+            for _k, _v in {"melamina": "melamina", "aglomerado": "melamina", "mdf": "melamina",
+                           "bilaminad": "melamina", "aluminio": "aluminio", "incisor": "incisor",
+                           "triturador": "triturador", "seccionadora": "seccionadora",
+                           "ranurar": "ranurar", "multiple": "multiple", "múltiple": "multiple",
+                           "madera": "madera"}.items():
+                if _k in pk:
+                    sg = _v; break
+        if sg:
+            cond.append("subgrupo = %s"); p.append(sg)
+        elif palabra_clave:
             cond.append("(uso ILIKE %s OR titulo ILIKE %s OR spec_raw ILIKE %s)")
             kw = f"%{palabra_clave}%"; p += [kw, kw, kw]
         where = " AND ".join(cond)

@@ -46,6 +46,32 @@ function parseEje(s) {
     return m ? parseFloat(m[1].replace(',', '.')) : null;
 }
 
+// Subgrupo fino, sobre todo para SIERRAS: separa melamina / madera / aluminio /
+// incisor / triturador / multiple para que el bot no confunda (ej. un incisor de
+// 125mm NO es la sierra principal de melamina).
+function subgrupoDe(familia, titulo, uso, codigo) {
+    const t = (titulo + ' ' + uso).toLowerCase();
+    const c = (codigo || '').toUpperCase();
+    if (familia === 'Sierras') {
+        if (/incisor/.test(t)) return 'incisor';
+        if (/triturador/.test(t) || c.startsWith('TR') || c.startsWith('LT')) return 'triturador';
+        if (/aluminio|pl[aá]stic|no ferroso/.test(t)) return 'aluminio';
+        if (/melamina|aglomerado|\bmdf\b|bilaminad|placa/.test(t)) return 'melamina';
+        if (/seccionadora/.test(t)) return 'seccionadora';
+        if (/m[uú]ltiple/.test(t)) return 'multiple';
+        if (/ranurar|ranurado/.test(t)) return 'ranurar';
+        if (/madera/.test(t)) return 'madera';
+        return 'otros';
+    }
+    if (familia === 'Diamante') {
+        if (/incisor/.test(t)) return 'incisor';
+        if (/disco|corte de placas/.test(t)) return 'disco';
+        if (/mecha|bisagra|perforac/.test(t)) return 'mecha';
+        return 'otros';
+    }
+    return null;
+}
+
 const filas = [];
 const vistos = new Set();
 const statsFam = {};
@@ -72,6 +98,7 @@ for (const key of Object.keys(base)) {
             marca,
             uso,
             material,
+            subgrupo: subgrupoDe(familia, titulo, uso, codigo),
             diametro_mm: parseDiametro(blob, familia),
             espesor_mm: parseEspesor(spec),
             eje_mm: parseEje(spec),
@@ -89,6 +116,10 @@ console.log('TOTAL variantes:', filas.length);
 console.log('Por familia:', JSON.stringify(statsFam));
 console.log('Con diametro:', filas.filter(f => f.diametro_mm != null).length);
 console.log('Con dientes :', filas.filter(f => f.dientes_z != null).length);
+// Subgrupos de sierras (para chequear el reconocimiento)
+const subSierras = {};
+filas.filter(f => f.familia === 'Sierras').forEach(f => { subSierras[f.subgrupo] = (subSierras[f.subgrupo] || 0) + 1; });
+console.log('Subgrupos SIERRAS:', JSON.stringify(subSierras));
 // Muestra: sierras melamina 300mm (lo que falló en el chat)
-const demo = filas.filter(f => f.familia === 'Sierras' && /melamina/i.test(f.uso + f.titulo) && f.diametro_mm === 300);
+const demo = filas.filter(f => f.familia === 'Sierras' && f.subgrupo === 'melamina' && f.diametro_mm === 300);
 console.log('DEMO sierras melamina 300mm:', JSON.stringify(demo.map(d => `${d.codigo} Z=${d.dientes_z}`)));
