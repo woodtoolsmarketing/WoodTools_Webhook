@@ -72,6 +72,45 @@ function subgrupoDe(familia, titulo, uso, codigo) {
     return null;
 }
 
+// Clasificacion de FLUJO (grupo/subtipo/material_corte) a nivel variante, misma
+// logica que el trigger fn_clasificar_producto pero aplicada al titulo/uso de cada
+// variante. Asi consultar_catalogo puede leer el CATALOGO COMPLETO (variantes) en
+// vez del subset de 82 filas de 'productos'.
+function grupoFlujo(familia, titulo, uso, subgrupo) {
+    const n = (titulo || '').toLowerCase();
+    const a = (uso || '').toLowerCase();
+    let grupo = null, subtipo = null, material_corte = null;
+    if (familia === 'Sierras') {
+        grupo = subgrupo;   // rico: melamina/madera/aluminio/incisor/triturador/...
+    } else if (familia === 'Fresas') {
+        if (/cepillador/.test(n)) grupo = 'cepillado';
+        else if (/machimbre|deck|frente ingl|z[oó]calo/.test(n)) grupo = 'machimbre';
+        else if (/finger|encastre|ensamble/.test(n)) grupo = 'finger';
+        else if (/recta|ranur|rincone|repl/.test(n)) grupo = 'canales';
+        else grupo = 'moldura';
+        if (grupo === 'moldura')
+            subtipo = /multimoldura|y ventanas|c[oó]ncavo y convexo|radios m/.test(n) ? 'combo' : 'individual';
+    } else if (familia === 'Mechas') {
+        if (/accesorio/.test(a) || /mandril|pinza/.test(n)) grupo = 'accesorio';
+        else if (/integral|cnc/.test(n) || /cnc/.test(a)) grupo = 'integral_cnc';
+        else if (/bisagra|cazoleta/.test(n)) grupo = 'bisagra';
+        else if (/barreno/.test(n)) grupo = 'barreno';
+        else if (/ciega|avellan/.test(n)) grupo = 'ciega';
+        else if (/pasante/.test(n)) grupo = 'pasante';
+        else grupo = 'router_especial';
+    } else if (familia === 'Cuchillas') {
+        if (/cabezal/.test(n)) grupo = 'cabezales';
+        else if (/chipera/.test(n)) grupo = 'chipera';
+        else if (/dorso ranurado/.test(n)) grupo = 'dorso_ranurado';
+        else grupo = 'planas';
+        if (/hss/.test(n)) material_corte = 'hss';
+        else if (/\bwidia\b|metal duro|\bmd\b/.test(n)) material_corte = 'widia';
+    } else if (familia === 'Diamante') {
+        grupo = subgrupo;
+    }
+    return { grupo, subtipo, material_corte };
+}
+
 const filas = [];
 const vistos = new Set();
 const statsFam = {};
@@ -91,6 +130,8 @@ for (const key of Object.keys(base)) {
         vistos.add(codigo);
         const spec = (v.nombre || '').trim();
         const blob = spec + ' ' + titulo;
+        const sub = subgrupoDe(familia, titulo, uso, codigo);
+        const gf = grupoFlujo(familia, titulo, uso, sub);
         filas.push({
             codigo,
             familia,
@@ -98,7 +139,10 @@ for (const key of Object.keys(base)) {
             marca,
             uso,
             material,
-            subgrupo: subgrupoDe(familia, titulo, uso, codigo),
+            subgrupo: sub,
+            grupo: gf.grupo,
+            subtipo: gf.subtipo,
+            material_corte: gf.material_corte,
             diametro_mm: parseDiametro(blob, familia),
             espesor_mm: parseEspesor(spec),
             eje_mm: parseEje(spec),
@@ -120,6 +164,13 @@ console.log('Con dientes :', filas.filter(f => f.dientes_z != null).length);
 const subSierras = {};
 filas.filter(f => f.familia === 'Sierras').forEach(f => { subSierras[f.subgrupo] = (subSierras[f.subgrupo] || 0) + 1; });
 console.log('Subgrupos SIERRAS:', JSON.stringify(subSierras));
+// Grupos de flujo por familia + huerfanos (grupo NULL en familias del flujo)
+const flujoFams = ['Sierras', 'Fresas', 'Mechas', 'Cuchillas'];
+flujoFams.forEach(fam => {
+    const g = {};
+    filas.filter(f => f.familia === fam).forEach(f => { g[f.grupo || 'NULL'] = (g[f.grupo || 'NULL'] || 0) + 1; });
+    console.log(`Grupos ${fam}:`, JSON.stringify(g));
+});
 // Muestra: sierras melamina 300mm (lo que falló en el chat)
 const demo = filas.filter(f => f.familia === 'Sierras' && f.subgrupo === 'melamina' && f.diametro_mm === 300);
 console.log('DEMO sierras melamina 300mm:', JSON.stringify(demo.map(d => `${d.codigo} Z=${d.dientes_z}`)));

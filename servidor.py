@@ -296,34 +296,38 @@ def consultar_catalogo(familia: str, grupo: str = "", subtipo: str = "",
     Pasa solo los filtros que ya confirmaste con el cliente; deja en '' los que no sepas.
 
     Args:
-        familia: 'Sierras', 'Fresas', 'Mechas' o 'Cuchillas'.
-        grupo: valor del slot 'grupo' del flujo (ej 'melamina','moldura','pasante','planas').
+        familia: 'Sierras', 'Fresas', 'Mechas', 'Cuchillas', 'Diamante' o 'Cabezales'.
+        grupo: valor del slot 'grupo' del flujo. Sierras: melamina/madera/aluminio/incisor/
+               triturador/multiple. Fresas: cepillado/canales/moldura/machimbre/finger.
+               Mechas: pasante/ciega/bisagra/integral_cnc/barreno/accesorio. Cuchillas:
+               planas/dorso_ranurado/chipera/cabezales.
         subtipo: solo fresas moldura: 'individual' o 'combo'. Vacío si no aplica.
         material_corte: solo cuchillas: 'hss' o 'widia'. Vacío si no aplica.
         lado: solo mechas, si la máquina lo exige: 'derecha' o 'izquierda'. Vacío si no.
     """
     try:
+        # Lee el CATALOGO COMPLETO (variantes, 654 filas), no el subset de 82.
         cond = ["familia ILIKE %s"]; p = [f"%{familia or ''}%"]
         if grupo:          cond.append("grupo = %s");          p.append(grupo)
         if subtipo:        cond.append("subtipo = %s");        p.append(subtipo)
         if material_corte: cond.append("material_corte = %s"); p.append(material_corte)
         if lado and lado.strip().lower() not in ('ambas', 'ambos', 'indistinto', 'cualquiera', 'los dos', ''):
-            cond.append("(nombre_publico ~* %s OR nombre_publico ~* 'derecha e izquierda|d e i')")
+            cond.append("(titulo ~* %s OR titulo ~* 'derecha e izquierda|d e i')")
             p.append(lado)
         where = " AND ".join(cond)
-        q = ("SELECT marca, nombre_publico, codigo_interno, aplicacion_material, medidas_y_specs "
-             "FROM productos WHERE " + where +
-             " ORDER BY (grupo IS NOT NULL) DESC, nombre_publico LIMIT 2")
+        q = ("SELECT marca, titulo, codigo, uso, spec_raw, diametro_mm "
+             "FROM variantes WHERE " + where +
+             " ORDER BY diametro_mm NULLS LAST, titulo LIMIT 2")
         rows = execute_db_query(q, tuple(p), fetchall=True)
         if not rows:
             return (f"Sin match exacto (familia={familia} grupo={grupo} subtipo={subtipo}). "
-                    "Pedi UN dato mas o deriva al asesor. Si pide 'diamante', no hay: deriva.")
-        total = execute_db_query("SELECT count(*) FROM productos WHERE " + where, tuple(p), fetchone=True)
+                    "Pedi UN dato mas, probá otra palabra, o derivá al asesor.")
+        total = execute_db_query("SELECT count(*) FROM variantes WHERE " + where, tuple(p), fetchone=True)
         cab = "DATOS TECNICOS (max 2, no pegar codigo)"
         if total and total[0] > 2:
             cab += f" [hay {total[0]} en total, pedi 1 dato mas para afinar]"
         texto = cab + ":\n"
-        for r in rows:  # r = (marca, nombre_publico, codigo_interno, aplic, specs)
+        for r in rows:  # r = (marca, titulo, codigo, uso, spec_raw, diametro)
             texto += f"- {r[1]} ({r[0]}). cod_oculto:{r[2]}. Uso:{r[3]}. Specs:{r[4]}\n"
         return texto
     except Exception:
