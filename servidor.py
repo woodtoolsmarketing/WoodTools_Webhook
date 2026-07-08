@@ -2,7 +2,7 @@ import os
 import sqlite3
 import urllib.parse
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, redirect
+from flask import Flask, request, jsonify, redirect, Response
 import requests
 import gspread
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -894,12 +894,29 @@ def borrar_aprendizaje(aid):
 @app.route('/fresas_cortes', methods=['GET'])
 def listar_fresas_cortes():
     rows = execute_db_query(
-        "SELECT id, nombre, grupo, descripcion_corte, palabras_clave, activo FROM fresas_cortes ORDER BY id",
-        fetchall=True) or []
+        "SELECT id, nombre, grupo, descripcion_corte, palabras_clave, activo, (imagen IS NOT NULL) "
+        "FROM fresas_cortes ORDER BY id", fetchall=True) or []
     return jsonify([{
         "id": r[0], "nombre": r[1], "grupo": r[2], "descripcion_corte": r[3],
-        "palabras_clave": r[4], "activo": bool(r[5])
+        "palabras_clave": r[4], "activo": bool(r[5]), "tiene_imagen": bool(r[6])
     } for r in rows]), 200
+
+@app.route('/fresas_cortes/<int:cid>/imagen', methods=['POST'])
+def subir_imagen_corte(cid):
+    f = request.files.get('foto')
+    if not f:
+        return jsonify({"error": "Falta la foto"}), 400
+    data = f.read()
+    execute_db_query("UPDATE fresas_cortes SET imagen=%s, imagen_tipo=%s WHERE id=%s",
+                     (psycopg2.Binary(data), (f.mimetype or 'image/png'), cid), commit=True)
+    return jsonify({"status": "ok", "id": cid}), 200
+
+@app.route('/fresas_cortes/<int:cid>/imagen', methods=['GET'])
+def obtener_imagen_corte(cid):
+    r = execute_db_query("SELECT imagen, imagen_tipo FROM fresas_cortes WHERE id=%s", (cid,), fetchone=True)
+    if not r or not r[0]:
+        return jsonify({"error": "Sin imagen"}), 404
+    return Response(bytes(r[0]), mimetype=(r[1] or 'image/png'))
 
 @app.route('/fresas_corte', methods=['POST'])
 def agregar_fresa_corte():
