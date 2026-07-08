@@ -486,6 +486,14 @@ def obtener_prompt_personalizado(telefono, modo_bot):
     correcciones = ("\nCORRECCIONES APRENDIDAS (cumplilas SI O SI):\n- " + "\n- ".join(glob)) if glob else ""
     return f"{BASE_CONOCIMIENTO}\n{contexto}\n{reglas}{correcciones}"
 
+def guia_cortes_fresas():
+    """Guía (desde SQL, tabla fresas_cortes) para identificar la fresa por el CORTE
+    que deja en la madera. Se inyecta cuando el cliente manda una foto."""
+    rows = execute_db_query(
+        "SELECT nombre, descripcion_corte FROM fresas_cortes WHERE activo = true ORDER BY id",
+        fetchall=True) or []
+    return "\n".join(f"- {r[0]}: {r[1]}" for r in rows)
+
 def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None):
     with get_chat_lock(telefono):
         if texto_entrante and "reset" in texto_entrante.strip().lower():
@@ -510,15 +518,16 @@ def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None):
             
             if imagen_pil:
                 vision = "\n".join([
-                    "INSTRUCCIÓN VISUAL ESTRICTA:",
-                    "- MADERA con cortes a 90°/machimbre: Fresa Bisagra o Machimbre.",
-                    "- MADERA con dientes en V aguda: Fresa Finger.",
-                    "- MADERA con cortes planos/trapecios: Ensamble Cónico.",
-                    "- MADERA con curvas decorativas complejas: FRESA MULTIMOLDURA.",
-                    "- METAL Rodillo: Cabezal Cepillador.",
-                    "- METAL Curvas locas y exageradas: Fresa Multimoldura.",
-                    "- METAL Tornasol/Arcoíris: Fresa Compresión.",
-                    "Reconoce la herramienta con entusiasmo basándote en la madera cortada o el metal. NUNCA des códigos internos."
+                    "INSTRUCCIÓN VISUAL: el cliente mandó una foto. Mírala y decidí qué es.",
+                    "1) Si es una PIEZA DE MADERA con un CORTE/PERFIL: identificá qué FRESA lo hizo",
+                    "   comparando la forma del corte con esta guía (elegí la que más se parezca):",
+                    guia_cortes_fresas(),
+                    "   Cuando la identifiques, nombrá la fresa con entusiasmo y buscá el producto con",
+                    "   consultar_catalogo('Fresas', grupo) o consultar_medidas para dar specs. Si dudás",
+                    "   entre 2, mostrá las 2 y preguntá un detalle (ej. medida del perfil).",
+                    "2) Si es una HERRAMIENTA (fresa, sierra, mecha): reconocela y ofrecé la que corresponda.",
+                    "3) Si no se entiende, pedí amablemente otra foto más clara o que describa qué hace.",
+                    "NUNCA des códigos internos. No inventes: si el corte no coincide con ninguno, decilo y derivá.",
                 ])
                 respuesta = chat.send_message([vision, imagen_pil, texto_entrante or ""])
             else:
