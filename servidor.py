@@ -494,6 +494,52 @@ def guia_cortes_fresas():
         fetchall=True) or []
     return "\n".join(f"- {r[0]}: {r[1]}" for r in rows)
 
+def identificar_fresa_visual(img):
+    """Identifica la fresa de un corte en 2 pasos:
+    1) candidato por la guía de texto; 2) confirmación VISUAL comparando la foto del
+    cliente contra la foto de referencia del candidato (si esa fresa tiene foto cargada).
+    Devuelve el texto final para el cliente."""
+    guia = guia_cortes_fresas()
+    try:
+        model = genai.GenerativeModel(model_name='gemini-2.5-flash')
+        # --- Paso 1: candidato por descripción ---
+        instr1 = "\n".join([
+            "Mirá esta foto de un CORTE/PERFIL en madera e identificá qué FRESA de WoodTools lo hizo,",
+            "comparando con la guía. Explicá corto por qué. Al FINAL agregá una línea EXACTA:",
+            "FRESA: <nombre exacto de la fresa de la guía>",
+            guia,
+        ])
+        r1 = model.generate_content([instr1, img])
+        txt1 = (r1.text or "").strip()
+        m = re.search(r'FRESA:\s*(.+)', txt1)
+        nombre = m.group(1).strip().strip('*. ') if m else ""
+        # --- Buscar foto de referencia del candidato ---
+        ref_img = None
+        if nombre:
+            row = execute_db_query(
+                "SELECT imagen FROM fresas_cortes WHERE activo = true AND imagen IS NOT NULL "
+                "AND nombre ILIKE %s LIMIT 1", (f"%{nombre}%",), fetchone=True)
+            if row and row[0]:
+                try:
+                    ref_img = Image.open(io.BytesIO(bytes(row[0])))
+                except Exception:
+                    ref_img = None
+        # Sin foto de referencia -> devolvemos el paso 1 (guía de texto)
+        if ref_img is None:
+            return re.sub(r'\n?FRESA:\s*.+$', '', txt1).strip() or txt1
+        # --- Paso 2: confirmación visual ---
+        instr2 = "\n".join([
+            f"IMAGEN 1 = corte que mandó el cliente. IMAGEN 2 = corte de REFERENCIA de la fresa '{nombre}'.",
+            "Compará las dos formas. Si el corte del cliente coincide con esa referencia, CONFIRMÁ la fresa.",
+            "Si NO coinciden, decí qué fresa te parece en realidad usando la guía. Respondé corto y claro,",
+            "sin códigos internos.",
+            guia,
+        ])
+        r2 = model.generate_content([instr2, img, ref_img])
+        return (r2.text or "").strip() or txt1
+    except Exception:
+        return "No pude analizar bien la foto. ¿Me la mandás un poco más clara o me contás qué hace la fresa?"
+
 def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None):
     with get_chat_lock(telefono):
         if texto_entrante and "reset" in texto_entrante.strip().lower():
@@ -517,17 +563,20 @@ def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None):
             chat = model.start_chat(history=historial[:-1], enable_automatic_function_calling=True)
             
             if imagen_pil:
+                # Análisis visual de 2 pasos (candidato por texto + confirmación contra
+                # la foto de referencia del candidato). Si la foto es un corte, esto ya
+                # trae la fresa identificada; el chat solo la ofrece y busca el producto.
+                analisis_corte = identificar_fresa_visual(imagen_pil)
                 vision = "\n".join([
-                    "INSTRUCCIÓN VISUAL: el cliente mandó una foto. Mírala y decidí qué es.",
-                    "1) Si es una PIEZA DE MADERA con un CORTE/PERFIL: identificá qué FRESA lo hizo",
-                    "   comparando la forma del corte con esta guía (elegí la que más se parezca):",
-                    guia_cortes_fresas(),
-                    "   Cuando la identifiques, nombrá la fresa con entusiasmo y buscá el producto con",
-                    "   consultar_catalogo('Fresas', grupo) o consultar_medidas para dar specs. Si dudás",
-                    "   entre 2, mostrá las 2 y preguntá un detalle (ej. medida del perfil).",
-                    "2) Si es una HERRAMIENTA (fresa, sierra, mecha): reconocela y ofrecé la que corresponda.",
-                    "3) Si no se entiende, pedí amablemente otra foto más clara o que describa qué hace.",
-                    "NUNCA des códigos internos. No inventes: si el corte no coincide con ninguno, decilo y derivá.",
+                    "El cliente mandó una FOTO.",
+                    "ANÁLISIS VISUAL AUTOMÁTICO (válido si la foto es un CORTE de madera):",
+                    analisis_corte,
+                    "- Si la foto es un corte: usá ese análisis, nombrá la fresa y buscá el producto con",
+                    "  consultar_catalogo('Fresas', grupo) o consultar_medidas. Si duda entre 2, mostrá las 2.",
+                    "- Si la foto es una HERRAMIENTA (fresa/sierra/mecha) u otra cosa: ignorá el análisis y",
+                    "  reconocela vos mirando la imagen.",
+                    "- Si no se entiende, pedí otra foto más clara o que describa qué hace.",
+                    "NUNCA des códigos internos.",
                 ])
                 respuesta = chat.send_message([vision, imagen_pil, texto_entrante or ""])
             else:
@@ -956,16 +1005,7 @@ def identificar_corte():
         if not f:
             return jsonify({"error": "Falta la foto"}), 400
         img = Image.open(io.BytesIO(f.read()))
-        instruccion = "\n".join([
-            "Mirá esta foto de un CORTE/PERFIL en madera e identificá qué FRESA de WoodTools lo hizo,",
-            "comparando con esta guía (elegí la que más se parezca). Respondé corto y claro: el nombre",
-            "de la fresa y en 1 frase por qué. Si dudás entre 2, nombralas. Si no coincide con ninguna,",
-            "decilo. No des códigos internos.",
-            guia_cortes_fresas(),
-        ])
-        model = genai.GenerativeModel(model_name='gemini-2.5-flash')
-        resp = model.generate_content([instruccion, img])
-        return jsonify({"resultado": (resp.text or "").strip()}), 200
+        return jsonify({"resultado": identificar_fresa_visual(img)}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
