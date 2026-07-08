@@ -930,5 +930,27 @@ def borrar_fresa_corte(cid):
     execute_db_query("DELETE FROM fresas_cortes WHERE id = %s", (cid,), commit=True)
     return jsonify({"status": "ok", "id": cid}), 200
 
+@app.route('/identificar_corte', methods=['POST'])
+def identificar_corte():
+    """Recibe una foto de un corte (multipart 'foto') y devuelve qué fresa lo hizo,
+    con la misma guía que usa el bot. Sirve para usar/probar la identificación desde la app."""
+    try:
+        f = request.files.get('foto')
+        if not f:
+            return jsonify({"error": "Falta la foto"}), 400
+        img = Image.open(io.BytesIO(f.read()))
+        instruccion = "\n".join([
+            "Mirá esta foto de un CORTE/PERFIL en madera e identificá qué FRESA de WoodTools lo hizo,",
+            "comparando con esta guía (elegí la que más se parezca). Respondé corto y claro: el nombre",
+            "de la fresa y en 1 frase por qué. Si dudás entre 2, nombralas. Si no coincide con ninguna,",
+            "decilo. No des códigos internos.",
+            guia_cortes_fresas(),
+        ])
+        model = genai.GenerativeModel(model_name='gemini-2.5-flash')
+        resp = model.generate_content([instruccion, img])
+        return jsonify({"resultado": (resp.text or "").strip()}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == '__main__': app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
