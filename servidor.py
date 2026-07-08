@@ -887,4 +887,48 @@ def borrar_aprendizaje(aid):
     return jsonify({"status": "ok", "id": aid}), 200
 
 
+# ==========================================
+# CORTES DE FRESAS (guía de visión, editable desde la app)
+# El bot los usa para identificar la fresa por la foto del corte.
+# ==========================================
+@app.route('/fresas_cortes', methods=['GET'])
+def listar_fresas_cortes():
+    rows = execute_db_query(
+        "SELECT id, nombre, grupo, descripcion_corte, palabras_clave, activo FROM fresas_cortes ORDER BY id",
+        fetchall=True) or []
+    return jsonify([{
+        "id": r[0], "nombre": r[1], "grupo": r[2], "descripcion_corte": r[3],
+        "palabras_clave": r[4], "activo": bool(r[5])
+    } for r in rows]), 200
+
+@app.route('/fresas_corte', methods=['POST'])
+def agregar_fresa_corte():
+    d = request.get_json(silent=True) or {}
+    nombre = (d.get('nombre') or '').strip()
+    desc = (d.get('descripcion_corte') or '').strip()
+    if not nombre or not desc:
+        return jsonify({"error": "Falta nombre o descripción del corte"}), 400
+    execute_db_query(
+        "INSERT INTO fresas_cortes (nombre, grupo, descripcion_corte, palabras_clave, activo) "
+        "VALUES (%s, %s, %s, %s, true)",
+        (nombre, (d.get('grupo') or '').strip(), desc, (d.get('palabras_clave') or '').strip()), commit=True)
+    return jsonify({"status": "ok"}), 200
+
+@app.route('/fresas_cortes/<int:cid>/editar', methods=['POST'])
+def editar_fresa_corte(cid):
+    d = request.get_json(silent=True) or {}
+    desc = (d.get('descripcion_corte') or '').strip()
+    if not desc:
+        return jsonify({"error": "Falta descripción"}), 400
+    execute_db_query(
+        "UPDATE fresas_cortes SET descripcion_corte=%s, grupo=%s, palabras_clave=%s WHERE id=%s",
+        (desc, (d.get('grupo') or '').strip(), (d.get('palabras_clave') or '').strip(), cid), commit=True)
+    return jsonify({"status": "ok", "id": cid}), 200
+
+@app.route('/fresas_cortes/<int:cid>', methods=['DELETE'])
+def borrar_fresa_corte(cid):
+    execute_db_query("DELETE FROM fresas_cortes WHERE id = %s", (cid,), commit=True)
+    return jsonify({"status": "ok", "id": cid}), 200
+
+
 if __name__ == '__main__': app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
