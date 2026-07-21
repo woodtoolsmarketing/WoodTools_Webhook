@@ -9,6 +9,12 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request 
 import google.generativeai as genai
+try:
+    from google import genai as genai_web           # SDK nuevo, SOLO para búsqueda web (grounding)
+    from google.genai import types as genai_web_types
+except Exception:
+    genai_web = None
+    genai_web_types = None
 import json
 import psycopg2 
 from psycopg2 import pool 
@@ -61,6 +67,13 @@ except Exception as e:
     TOKEN_DE_VERIFICACION = CLOUD_API_TOKEN = PHONE_NUMBER_ID = GEMINI_API_KEY = DATABASE_URL = ""
 
 genai.configure(api_key=GEMINI_API_KEY)
+# Cliente del SDK nuevo, SOLO para buscar specs técnicas de otras marcas en internet.
+_web_client = None
+try:
+    if genai_web and GEMINI_API_KEY:
+        _web_client = genai_web.Client(api_key=GEMINI_API_KEY)
+except Exception:
+    _web_client = None
 NOMBRE_HOJA = "Base de datos wt"
 RUTA_CREDENCIALES = "/etc/secrets/credenciales.json" if os.path.exists("/etc/secrets/credenciales.json") else "credenciales.json"
 
@@ -415,6 +428,7 @@ BASE_CONOCIMIENTO = "\n".join([
     "- Si es ambiguo ('hola'/'busco algo'): UNA pregunta corta y abierta. No listes las familias como menu.",
     "- Cuando tengas grupo (y subtipo/material si aplica), llama consultar_catalogo(familia, grupo, subtipo, material_corte, lado). Devuelve 1-2 opciones: ofrecelas.",
     "- Si el cliente pide una MEDIDA puntual o pregunta cuantos dientes / que medidas tiene, llama consultar_medidas(familia, diametro_mm, dientes, palabra_clave). Trae specs EXACTAS (diametro, dientes Z, espesor, eje). NO inventes ni digas 'no tengo el dato': consultá esta tool.",
+    "- Si el cliente menciona una herramienta de OTRA MARCA (no Freud/WoodTools), llama buscar_specs_otra_marca(marca, producto) para sacar SOLO los datos tecnicos de esa herramienta, y con esos datos buscá NUESTRO equivalente con consultar_medidas/consultar_catalogo. Ofrecelo como alternativa. Si el modelo no esta claro, pedí UN detalle (medida o uso). PROHIBIDO hablar de precios o promociones (ni de la otra marca ni nuestros).",
     "",
     "ANTI-REPETICION Y TONO HUMANO (lo MAS importante):",
     "- Antes de CADA mensaje arma mentalmente la lista de lo que el cliente YA dijo (familia, material, medida en mm, dientes, etc.). Solo preguntá lo que FALTA; nunca pidas algo que ya este en esa lista.",
@@ -468,19 +482,31 @@ def obtener_prompt_personalizado(telefono, modo_bot):
     vend_db = res[0] if res else None
     
     mapa = {"5491145394279": "Valentín", "5491157528428": "Emmanuel", "5491134811771": "Ariel", "5491165630406": "Carlos"}
-    nombre_vend = mapa.get(vend_db, "asesor") if vend_db else "[Aún no elegido]"
+    # El NOMBRE y el ENLACE apuntan SIEMPRE al mismo vendedor (sin asignar -> Valentín).
     tel_vend = vend_db if vend_db in mapa else "5491145394279"
-    
-    contexto = f"VENDEDOR: {nombre_vend}. CLIENTE: +{telefono}.\n"
-    if not vend_db: 
-        contexto += "ATENCIÓN: Si es el PRIMER mensaje y solo dicen 'Hola', pregunta con quién hablan. Si ya te hacen una consulta directa (ej. 'Busco fresa') O te dicen que 'les da igual' el vendedor, ASIGNA A VALENTÍN EN SILENCIO y avanza con la venta. NO repitas la pregunta de con quién quieren hablar.\n"
-    
+    nombre_vend = mapa[tel_vend]
+
+    def _enlace(tv):
+        return f"https://woodtools-webhook.onrender.com/wa/{tanda}/{t_10}/{tv}?text=Hola,%20cotizacion:%0A-%20[Prod]"
+
+    contexto = f"VENDEDOR ASIGNADO: {nombre_vend}. CLIENTE: +{telefono}.\n"
+    if not vend_db:
+        contexto += (f"Si es el PRIMER mensaje y solo dicen 'Hola', preguntá el nombre del cliente. Si ya "
+                     f"hacen una consulta directa o les da igual el vendedor, avanzá con la venta con {nombre_vend}. "
+                     "NO repitas la pregunta.\n")
+
+    vendedores_links = "\n".join([f"  - {mapa[tv]}: {_enlace(tv)}" for tv in mapa])
     reglas = "\n".join([
         "MODO BÁSICO:" if modo_bot == "BASICO" else "MODO INTELIGENTE:",
         "- Respuestas ultra cortas, naturales y amigables." if modo_bot == "BASICO" else "- Arma carrito de compras con respuestas naturales y breves.",
         "- NO repitas saludos en cada mensaje.",
         "- Pregunta si quiere algo más antes de cerrar. Si dice no, genera el enlace.",
-        f"ENLACE EXACTO: https://woodtools-webhook.onrender.com/wa/{tanda}/{t_10}/{tel_vend}?text=Hola,%20cotizacion:%0A-%20[Prod]"
+        "VENDEDOR (no te equivoques: el nombre que digas = el vendedor del enlace que mandás):",
+        f"- Por defecto es {nombre_vend}: usá SU enlace y, si lo nombrás, decí ese nombre.",
+        "- Si el cliente pide EXPRESAMENTE otro vendedor por nombre, usá el enlace de ESE vendedor de la lista y nombralo a él.",
+        "- NUNCA menciones un vendedor distinto al del enlace que enviás.",
+        "ENLACES POR VENDEDOR:",
+        vendedores_links,
     ])
     glob = obtener_aprendizajes('global')
     correcciones = ("\nCORRECCIONES APRENDIDAS (cumplilas SI O SI):\n- " + "\n- ".join(glob)) if glob else ""
@@ -540,6 +566,33 @@ def identificar_fresa_visual(img):
     except Exception:
         return "No pude analizar bien la foto. ¿Me la mandás un poco más clara o me contás qué hace la fresa?"
 
+def buscar_specs_otra_marca(marca: str, producto: str) -> str:
+    """Busca en internet SOLO los datos TÉCNICOS de una herramienta de OTRA marca (que NO sea
+    Freud ni WoodTools) para poder ofrecer el equivalente nuestro. Usala apenas el cliente
+    menciona una herramienta de otra marca (ej CMT, Leitz, Bosch, Makita, Amana, Jai, etc).
+
+    Args:
+        marca: la marca que mencionó el cliente (ej 'CMT').
+        producto: modelo o descripción (ej 'sierra 300mm 96 dientes melamina', 'fresa recta 12mm').
+    Returns:
+        Especificaciones técnicas (diámetro, ancho, eje, dientes, material, uso). NUNCA precios.
+    """
+    if not _web_client:
+        return "No puedo buscar en internet ahora. Pedile al cliente diámetro, dientes y uso, y busco un equivalente."
+    try:
+        prompt = (
+            "Buscá en internet SOLO las especificaciones técnicas de esta herramienta de carpintería: "
+            f"{marca} {producto}. Devolvé ÚNICAMENTE los datos técnicos (diámetro exterior, ancho de "
+            "corte, eje/agujero, cantidad de dientes, material, uso/aplicación) en 2 a 4 líneas. "
+            "NO menciones precios, promociones, ni dónde comprarla. Si no lo encontrás, decilo.")
+        r = _web_client.models.generate_content(
+            model='gemini-2.5-flash', contents=prompt,
+            config=genai_web_types.GenerateContentConfig(
+                tools=[genai_web_types.Tool(google_search=genai_web_types.GoogleSearch())]))
+        return (r.text or "").strip() or "No encontré datos técnicos de esa marca. Pedile al cliente que aclare el modelo."
+    except Exception:
+        return "No pude buscar los datos de esa marca. Pedile diámetro, dientes y uso, y busco un equivalente."
+
 def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None):
     with get_chat_lock(telefono):
         if texto_entrante and "reset" in texto_entrante.strip().lower():
@@ -559,7 +612,7 @@ def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None):
         txt_historial = f"[Imagen analizada] {texto_entrante}".strip() if imagen_pil else texto_entrante
 
         try:
-            model = genai.GenerativeModel(model_name='gemini-2.5-flash', tools=[consultar_catalogo, consultar_flujo, consultar_medidas])
+            model = genai.GenerativeModel(model_name='gemini-2.5-flash', tools=[consultar_catalogo, consultar_flujo, consultar_medidas, buscar_specs_otra_marca])
             chat = model.start_chat(history=historial[:-1], enable_automatic_function_calling=True)
             
             if imagen_pil:

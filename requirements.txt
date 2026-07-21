@@ -4,5 +4,6 @@ requests==2.31.0
 gspread
 APScheduler
 google-generativeai
+google-genai
 psycopg2-binary
 Pillow
