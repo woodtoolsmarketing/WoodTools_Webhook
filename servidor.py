@@ -101,6 +101,11 @@ def get_chat_lock(telefono):
 def hora_arg():
     return datetime.utcnow() - timedelta(hours=3)
 
+def estado_horario():
+    """Abierto/cerrado AHORA. Horario: Lunes a Viernes 08:00-17:00; fin de semana cerrado."""
+    ahora = hora_arg()
+    return "abierto" if (ahora.weekday() <= 4 and 8 <= ahora.hour < 17) else "cerrado"
+
 def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=False, retries=1):
     if not db_pool: return None
     for attempt in range(retries + 1):
@@ -423,7 +428,7 @@ BASE_CONOCIMIENTO = "\n".join([
     "5. Familias validas: Sierras, Fresas, Mechas, Cuchillas, Diamante y Cabezales.",
     "",
     "COMO TRABAJAR (recuperacion just-in-time, NO inventes el flujo):",
-    "- Detecta la familia: sierra/disco/cortar placa->Sierras; fresa/router/tupi/moldura/cepillar/CNC->Fresas; mecha/broca/perforar/bisagra->Mechas; cuchilla/cepillo/moldurera/chipera->Cuchillas; envios/afilado/horario->atencion.",
+    "- Detecta la familia: sierra/disco/cortar placa->Sierras; fresa/router/tupi/moldura/cepillar/CNC->Fresas; mecha/broca/perforar/bisagra->Mechas; cuchilla/cepillo/moldurera/chipera->Cuchillas; envios/afilado/horario/direccion/ubicacion/donde estan->atencion.",
     "- Apenas la sepas, llama consultar_flujo(familia) UNA vez: te dice que preguntar, en que orden, las opciones y a que dato mapea cada respuesta. Segui ESE flujo, no uno tuyo.",
     "- Si es ambiguo ('hola'/'busco algo'): UNA pregunta corta y abierta. No listes las familias como menu.",
     "- Cuando tengas grupo (y subtipo/material si aplica), llama consultar_catalogo(familia, grupo, subtipo, material_corte, lado). Devuelve 1-2 opciones: ofrecelas.",
@@ -490,6 +495,7 @@ def obtener_prompt_personalizado(telefono, modo_bot):
         return f"https://woodtools-webhook.onrender.com/wa/{tanda}/{t_10}/{tv}?text=Hola,%20cotizacion:%0A-%20[Prod]"
 
     contexto = f"VENDEDOR ASIGNADO: {nombre_vend}. CLIENTE: +{telefono}.\n"
+    contexto += f"AHORA el local está {estado_horario()} (horario: Lunes a Viernes 08:00-17:00; sábado y domingo cerrado).\n"
     if not vend_db:
         contexto += (f"Si es el PRIMER mensaje y solo dicen 'Hola', preguntá el nombre del cliente. Si ya "
                      f"hacen una consulta directa o les da igual el vendedor, avanzá con la venta con {nombre_vend}. "
