@@ -140,7 +140,9 @@ def init_db():
         execute_db_query('''CREATE TABLE IF NOT EXISTS chats_derivados (telefono TEXT PRIMARY KEY, vendedor TEXT, historial TEXT, fecha TIMESTAMP)''', commit=True)
         execute_db_query('''CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor TEXT)''', commit=True)
         try: execute_db_query("ALTER TABLE chat_sesiones ADD COLUMN advertido INTEGER DEFAULT 0", commit=True)
-        except Exception: pass 
+        except Exception: pass
+        try: execute_db_query("ALTER TABLE chat_sesiones ADD COLUMN derivado INTEGER DEFAULT 0", commit=True)
+        except Exception: pass
         try: execute_db_query("ALTER TABLE metricas_campanas ADD COLUMN derivados INTEGER DEFAULT 0", commit=True)
         except Exception: pass 
         try: execute_db_query("ALTER TABLE asignaciones_v2 ADD COLUMN fecha_asignacion TIMESTAMP", commit=True)
@@ -248,25 +250,52 @@ def revisar_rutinas_de_tiempo():
                 execute_db_query("DELETE FROM mensajes WHERE id=%s", (msg_id,), commit=True)
         execute_db_query("DELETE FROM asignaciones_v2 WHERE (fecha_asignacion < %s OR fecha_asignacion IS NULL) AND telefono_cliente NOT IN (SELECT telefono FROM chat_sesiones)", (hace_48_horas,), commit=True)
         
-        para_derivar = execute_db_query("SELECT telefono, historial FROM chat_sesiones WHERE ultima_interaccion < %s", (ahora - timedelta(hours=1),), fetchall=True)
-        if para_derivar:
-            for telefono, historial_str in para_derivar:
-                try:
-                    res_vend = execute_db_query("SELECT numero_vendedor, tipo_campana FROM asignaciones_v2 WHERE telefono_cliente = %s", (extraer_10_digitos(telefono),), fetchone=True)
-                    vendedor = res_vend[0] if res_vend else "Sin asignar"
-                    historial = json.loads(historial_str)
-                    execute_db_query("INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) VALUES (%s, %s, %s, %s) ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha", (telefono, vendedor, json.dumps(historial[2:] if len(historial) >= 2 else historial), hora_arg()), commit=True)
-                    aviso = f"🤖 *AVISO: Chat expirado por inactividad.*\nCliente: +{telefono}\nRevisar en panel."
-                    enviar_mensaje_whatsapp(vendedor if vendedor and vendedor != "Sin asignar" else "5491145394279", aviso)
-                    enviar_mensaje_whatsapp(telefono, "⚠️ Cerramos esta conversación automática por inactividad. Tu asesor te contactará a la brevedad. ¡Gracias!")
+        hace_72h = ahora - timedelta(hours=72)
+        hace_1h = ahora - timedelta(hours=1)
 
-                    # Registrar la derivación como métrica
-                    registrar_metrica('derivado', telefono)
+        # A) Último mensaje = pase a un vendedor (derivado=1): a las 72h se archiva y cierra,
+        #    SIN re-preguntar (el cliente ya fue pasado al vendedor).
+        cerrar_deriv = execute_db_query(
+            "SELECT telefono, historial FROM chat_sesiones WHERE COALESCE(derivado,0)=1 AND ultima_interaccion < %s",
+            (hace_72h,), fetchall=True) or []
+        for telefono, historial_str in cerrar_deriv:
+            _archivar_y_cerrar(telefono, historial_str, avisar_vendedor=False)
 
-                    execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono,), commit=True)
-                    execute_db_query("DELETE FROM asignaciones_v2 WHERE telefono_cliente = %s", (extraer_10_digitos(telefono),), commit=True)
-                except Exception: pass
+        # B) Sin pase a vendedor, 72h inactivos y aún no re-preguntados: se manda UNA re-pregunta.
+        repreguntar = execute_db_query(
+            "SELECT telefono FROM chat_sesiones WHERE COALESCE(advertido,0)=0 AND COALESCE(derivado,0)=0 AND ultima_interaccion < %s",
+            (hace_72h,), fetchall=True) or []
+        for fila in repreguntar:
+            telefono = fila[0]
+            enviar_mensaje_whatsapp(telefono, "¡Hola! 👋 ¿Seguís interesado/a en tu consulta? Si querés, seguimos donde quedamos. Si no me respondés, en un rato cierro la conversación. 🙂")
+            execute_db_query("UPDATE chat_sesiones SET advertido=1, ultima_interaccion=%s WHERE telefono=%s", (ahora, telefono), commit=True)
+
+        # C) Ya re-preguntados (advertido=1) que no contestaron en 1h: archivar y borrar.
+        sin_respuesta = execute_db_query(
+            "SELECT telefono, historial FROM chat_sesiones WHERE COALESCE(advertido,0)=1 AND ultima_interaccion < %s",
+            (hace_1h,), fetchall=True) or []
+        for telefono, historial_str in sin_respuesta:
+            _archivar_y_cerrar(telefono, historial_str, avisar_vendedor=True)
     except Exception: pass
+
+def _archivar_y_cerrar(telefono, historial_str, avisar_vendedor=True):
+    """Guarda la conversación en chats_derivados (para el panel) y borra la sesión. No manda
+    mensaje al cliente (la re-pregunta ya avisó que se cerraría)."""
+    try:
+        res_vend = execute_db_query("SELECT numero_vendedor FROM asignaciones_v2 WHERE telefono_cliente = %s", (extraer_10_digitos(telefono),), fetchone=True)
+        vendedor = res_vend[0] if res_vend else "Sin asignar"
+        try:
+            historial = json.loads(historial_str) if historial_str else []
+        except Exception:
+            historial = []
+        execute_db_query("INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) VALUES (%s, %s, %s, %s) ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha", (telefono, vendedor, json.dumps(historial[2:] if len(historial) >= 2 else historial), hora_arg()), commit=True)
+        if avisar_vendedor:
+            enviar_mensaje_whatsapp(vendedor if vendedor and vendedor != "Sin asignar" else "5491145394279", f"🤖 *Chat cerrado por inactividad (no respondió la re-pregunta).*\nCliente: +{telefono}\nRevisar en panel.")
+        registrar_metrica('derivado', telefono)
+        execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono,), commit=True)
+        execute_db_query("DELETE FROM asignaciones_v2 WHERE telefono_cliente = %s", (extraer_10_digitos(telefono),), commit=True)
+    except Exception:
+        pass
 
 scheduler = BackgroundScheduler()
 scheduler.add_job(func=revisar_rutinas_de_tiempo, trigger="interval", minutes=5)
@@ -607,7 +636,8 @@ def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None):
             return
             
         res = execute_db_query("SELECT historial, ultima_interaccion FROM chat_sesiones WHERE telefono = %s", (telefono,), fetchone=True)
-        if res and res[1] and hora_arg() - res[1] > timedelta(hours=1):
+        # La memoria dura 72hs. Recién pasadas las 72hs sin actividad se arranca de cero.
+        if res and res[1] and hora_arg() - res[1] > timedelta(hours=72):
             execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono,), commit=True)
             res = None
 
@@ -657,7 +687,12 @@ def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None):
             historial.append({"role": "user", "parts": [txt_historial]})
             historial.append({"role": "model", "parts": [txt_res]})
             
-            execute_db_query("INSERT INTO chat_sesiones (telefono, historial, ultima_interaccion, advertido) VALUES (%s, %s, %s, 0) ON CONFLICT (telefono) DO UPDATE SET historial = EXCLUDED.historial, ultima_interaccion = EXCLUDED.ultima_interaccion", (telefono, json.dumps(historial), hora_arg()), commit=True)
+            # advertido=0: el cliente contestó, ya no está "por cerrarse". derivado=1 si ESTE
+            # mensaje fue el pase a un vendedor (para no re-preguntarle después).
+            execute_db_query(
+                "INSERT INTO chat_sesiones (telefono, historial, ultima_interaccion, advertido, derivado) VALUES (%s, %s, %s, 0, %s) "
+                "ON CONFLICT (telefono) DO UPDATE SET historial = EXCLUDED.historial, ultima_interaccion = EXCLUDED.ultima_interaccion, advertido = 0, derivado = EXCLUDED.derivado",
+                (telefono, json.dumps(historial), hora_arg(), 1 if link else 0), commit=True)
             enviar_mensaje_whatsapp(telefono, txt_limpio, link_boton=link)
         except Exception as e:
             enviar_mensaje_whatsapp(telefono, "🤖 Un momento, revisando catálogo...")
