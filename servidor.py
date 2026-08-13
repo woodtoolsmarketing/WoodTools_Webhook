@@ -82,7 +82,9 @@ RUTA_CREDENCIALES = "/etc/secrets/credenciales.json" if os.path.exists("/etc/sec
 # ==========================================
 db_pool = None
 try:
-    db_pool = psycopg2.pool.SimpleConnectionPool(1, 10, DATABASE_URL, sslmode='require')
+    # ThreadedConnectionPool (no Simple): el servidor atiende cada mensaje en un hilo
+    # aparte y además corre el scheduler, y el Simple no está preparado para eso.
+    db_pool = psycopg2.pool.ThreadedConnectionPool(1, 10, DATABASE_URL, sslmode='require')
     if db_pool:
         print("✅ Pool de conexiones a PostgreSQL creado exitosamente.")
 except Exception as e:
@@ -139,6 +141,8 @@ def init_db():
         execute_db_query('''CREATE TABLE IF NOT EXISTS tracking_metricas (tanda_id TEXT, telefono TEXT, evento TEXT, PRIMARY KEY(tanda_id, telefono, evento))''', commit=True)
         execute_db_query('''CREATE TABLE IF NOT EXISTS chats_derivados (telefono TEXT PRIMARY KEY, vendedor TEXT, historial TEXT, fecha TIMESTAMP)''', commit=True)
         execute_db_query('''CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor TEXT)''', commit=True)
+        # Fotos que mandan los clientes por WhatsApp, para poder verlas después en el panel.
+        execute_db_query('''CREATE TABLE IF NOT EXISTS chat_imagenes (id SERIAL PRIMARY KEY, telefono TEXT, imagen BYTEA, imagen_tipo TEXT, fecha TIMESTAMP)''', commit=True)
         try: execute_db_query("ALTER TABLE chat_sesiones ADD COLUMN advertido INTEGER DEFAULT 0", commit=True)
         except Exception: pass
         try: execute_db_query("ALTER TABLE chat_sesiones ADD COLUMN derivado INTEGER DEFAULT 0", commit=True)
@@ -192,14 +196,54 @@ def enviar_mensaje_whatsapp(telefono_destino, texto, link_boton=None):
         requests.post(url, headers=headers, json={"messaging_product": "whatsapp", "to": telefono_destino, "type": "text", "text": {"body": f"{texto}\n\n👉 {link_boton}"}})
 
 def descargar_imagen_whatsapp(media_id):
+    """Devuelve (imagen_pil, bytes_originales, mime). Los bytes se conservan para poder
+    guardar la foto y que el vendedor la vea después en el panel."""
     try:
         headers = {"Authorization": f"Bearer {CLOUD_API_TOKEN}"}
         res_info = requests.get(f"https://graph.facebook.com/v18.0/{media_id}", headers=headers)
         if res_info.status_code == 200 and res_info.json().get('url'):
-            res_img = requests.get(res_info.json().get('url'), headers=headers)
-            if res_img.status_code == 200: return Image.open(io.BytesIO(res_img.content))
+            info = res_info.json()
+            res_img = requests.get(info.get('url'), headers=headers)
+            if res_img.status_code == 200:
+                contenido = res_img.content
+                mime = info.get('mime_type') or res_img.headers.get('Content-Type') or 'image/jpeg'
+                return Image.open(io.BytesIO(contenido)), contenido, mime
+        return None, None, None
+    except Exception:
+        return None, None, None
+
+def guardar_imagen_chat(telefono, contenido, mime, pil=None):
+    """Guarda la foto que mandó el cliente y devuelve su id (o None si falla).
+    Se guarda recomprimida (máx 1280px, JPEG) para no llenar la base de datos; de paso
+    se descartan los datos ocultos de la foto (ubicación GPS del celular, etc.)."""
+    if not contenido:
         return None
-    except Exception: return None
+    try:
+        if pil is not None:
+            try:
+                chico = pil.convert('RGB')
+                chico.thumbnail((1280, 1280), Image.Resampling.LANCZOS)
+                buf = io.BytesIO()
+                chico.save(buf, format='JPEG', quality=80)
+                contenido, mime = buf.getvalue(), 'image/jpeg'
+            except Exception:
+                pass  # si falla la recompresión, se guarda el original
+        if len(contenido) > 8 * 1024 * 1024:   # tope de seguridad: 8 MB
+            return None
+    except Exception:
+        pass
+    try:
+        # commit y fetchone juntos: execute_db_query confirma y después lee el id devuelto
+        # (los resultados ya están del lado del cliente, el commit no los pierde).
+        r = execute_db_query(
+            "INSERT INTO chat_imagenes (telefono, imagen, imagen_tipo, fecha) VALUES (%s, %s, %s, %s) RETURNING id",
+            (telefono, psycopg2.Binary(contenido), mime or 'image/jpeg', hora_arg()),
+            commit=True, fetchone=True)
+        if r:
+            return r[0]
+    except Exception:
+        pass
+    return None
 
 # ==========================================
 # REGISTRO DE MÉTRICAS (CORREGIDO)
@@ -249,6 +293,10 @@ def revisar_rutinas_de_tiempo():
             for msg_id, telefono in para_borrar:
                 execute_db_query("DELETE FROM mensajes WHERE id=%s", (msg_id,), commit=True)
         execute_db_query("DELETE FROM asignaciones_v2 WHERE (fecha_asignacion < %s OR fecha_asignacion IS NULL) AND telefono_cliente NOT IN (SELECT telefono FROM chat_sesiones)", (hace_48_horas,), commit=True)
+
+        # Las fotos de los clientes se guardan 90 días y después se borran, para no
+        # llenar la base de datos.
+        execute_db_query("DELETE FROM chat_imagenes WHERE fecha < %s", (ahora - timedelta(days=90),), commit=True)
         
         hace_72h = ahora - timedelta(hours=72)
         hace_1h = ahora - timedelta(hours=1)
@@ -628,7 +676,7 @@ def buscar_specs_otra_marca(marca: str, producto: str) -> str:
     except Exception:
         return "No pude buscar los datos de esa marca. Pedile diámetro, dientes y uso, y busco un equivalente."
 
-def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None):
+def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None, img_id=None):
     with get_chat_lock(telefono):
         if texto_entrante and "reset" in texto_entrante.strip().lower():
             execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono,), commit=True)
@@ -645,7 +693,15 @@ def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None):
         historial = json.loads(res[0]) if res else [{"role": "user", "parts": [prompt_din]}, {"role": "model", "parts": ["Entendido. Actuaré de forma 100% conversacional, natural y filtrando las búsquedas sin pegar listados enormes."]}]
         if res and len(historial) > 0 and historial[0]["role"] == "user": historial[0]["parts"] = [prompt_din]
 
-        txt_historial = f"[Imagen analizada] {texto_entrante}".strip() if imagen_pil else texto_entrante
+        # El marcador lleva el id de la foto guardada ([Imagen analizada #12]) para que el
+        # panel pueda mostrarla. Si no se pudo guardar, queda el marcador de siempre.
+        if imagen_pil:
+            marca = f"[Imagen analizada #{img_id}]" if img_id else "[Imagen analizada]"
+            txt_historial = f"{marca} {texto_entrante}".strip()
+        else:
+            txt_historial = texto_entrante
+
+        historial_guardado = False
 
         try:
             model = genai.GenerativeModel(model_name='gemini-2.5-flash', tools=[consultar_catalogo, consultar_flujo, consultar_medidas, buscar_specs_otra_marca])
@@ -693,8 +749,14 @@ def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None):
                 "INSERT INTO chat_sesiones (telefono, historial, ultima_interaccion, advertido, derivado) VALUES (%s, %s, %s, 0, %s) "
                 "ON CONFLICT (telefono) DO UPDATE SET historial = EXCLUDED.historial, ultima_interaccion = EXCLUDED.ultima_interaccion, advertido = 0, derivado = EXCLUDED.derivado",
                 (telefono, json.dumps(historial), hora_arg(), 1 if link else 0), commit=True)
+            historial_guardado = True
             enviar_mensaje_whatsapp(telefono, txt_limpio, link_boton=link)
         except Exception as e:
+            # Si el marcador nunca llegó al historial, la foto guardada quedaría huérfana
+            # ocupando lugar: se borra. Si el historial YA se guardó (falló solo el envío),
+            # la foto se conserva porque el marcador la referencia.
+            if img_id and not historial_guardado:
+                execute_db_query("DELETE FROM chat_imagenes WHERE id=%s", (img_id,), commit=True)
             enviar_mensaje_whatsapp(telefono, "🤖 Un momento, revisando catálogo...")
 
 # ==========================================
@@ -738,8 +800,13 @@ def recib():
 
                         if m['type'] == 'text': 
                             threading.Thread(target=procesar_mensaje_con_gemini, args=(tel, m['text']['body'])).start()
-                        elif m['type'] == 'image': 
-                            threading.Thread(target=lambda: procesar_mensaje_con_gemini(tel, m['image'].get('caption', ''), descargar_imagen_whatsapp(m['image']['id']))).start()
+                        elif m['type'] == 'image':
+                            def _procesar_imagen(tel=tel, media_id=m['image']['id'], caption=m['image'].get('caption', '')):
+                                pil, contenido, mime = descargar_imagen_whatsapp(media_id)
+                                # Guardamos la foto para que el vendedor pueda verla en el panel
+                                img_id = guardar_imagen_chat(tel, contenido, mime, pil)
+                                procesar_mensaje_con_gemini(tel, caption, pil, img_id)
+                            threading.Thread(target=_procesar_imagen).start()
                     
                     # 2. MANEJAR ESTADOS DE LECTURA Y ENTREGA
                     elif 'statuses' in change['value']:
@@ -1053,6 +1120,15 @@ def subir_imagen_corte(cid):
     execute_db_query("UPDATE fresas_cortes SET imagen=%s, imagen_tipo=%s WHERE id=%s",
                      (psycopg2.Binary(data), (f.mimetype or 'image/png'), cid), commit=True)
     return jsonify({"status": "ok", "id": cid}), 200
+
+@app.route('/chat_imagen/<int:img_id>', methods=['GET'])
+def obtener_imagen_chat(img_id):
+    """Devuelve la foto que mandó un cliente por WhatsApp (la referencia el marcador
+    [Imagen analizada #id] del historial)."""
+    r = execute_db_query("SELECT imagen, imagen_tipo FROM chat_imagenes WHERE id=%s", (img_id,), fetchone=True)
+    if not r or not r[0]:
+        return jsonify({"error": "Sin imagen"}), 404
+    return Response(bytes(r[0]), mimetype=(r[1] or 'image/jpeg'))
 
 @app.route('/fresas_cortes/<int:cid>/imagen', methods=['GET'])
 def obtener_imagen_corte(cid):
