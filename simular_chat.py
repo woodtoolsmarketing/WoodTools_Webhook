@@ -23,7 +23,10 @@ servidor.execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (TEL,
 prompt = servidor.obtener_prompt_personalizado(TEL, "BASICO")
 model = genai.GenerativeModel(
     model_name='gemini-2.5-flash',
-    tools=[servidor.consultar_catalogo, servidor.consultar_flujo, servidor.consultar_medidas]
+    # Mismas 4 tools que produccion (antes faltaba buscar_specs_otra_marca y la
+    # prueba no reflejaba el comportamiento real).
+    tools=[servidor.consultar_catalogo, servidor.consultar_flujo,
+           servidor.consultar_medidas, servidor.buscar_specs_otra_marca]
 )
 hist = [
     {"role": "user", "parts": [prompt]},

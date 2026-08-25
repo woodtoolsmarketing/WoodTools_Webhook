@@ -11,7 +11,9 @@ with open("catalogo_variantes.json", encoding="utf-8") as f:
 rows = [(
     r["codigo"], r["familia"], r["subgrupo"], r["grupo"], r["subtipo"], r["material_corte"],
     r["titulo"], r["marca"], r["uso"], r["material"],
-    r["diametro_mm"], r["espesor_mm"], r["eje_mm"], r["dientes_z"], r["spec_raw"]
+    r["diametro_mm"], r["espesor_mm"], r["eje_mm"], r["dientes_z"], r["spec_raw"],
+    r.get("lado"), r.get("largo_mm"), r.get("ancho_mm"),
+    r.get("diametro_min_mm"), r.get("diametro_max_mm")
 ) for r in filas]
 
 conn = psycopg2.connect(DATABASE_URL, sslmode="require")
@@ -22,7 +24,8 @@ cur.execute("TRUNCATE TABLE variantes RESTART IDENTITY")
 execute_values(cur, """
     INSERT INTO variantes
         (codigo, familia, subgrupo, grupo, subtipo, material_corte,
-         titulo, marca, uso, material, diametro_mm, espesor_mm, eje_mm, dientes_z, spec_raw)
+         titulo, marca, uso, material, diametro_mm, espesor_mm, eje_mm, dientes_z, spec_raw,
+         lado, largo_mm, ancho_mm, diametro_min_mm, diametro_max_mm)
     VALUES %s
 """, rows, page_size=200)
 conn.commit()

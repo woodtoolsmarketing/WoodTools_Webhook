@@ -127,6 +127,9 @@ def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=Fa
             if conn: db_pool.putconn(conn, close=True)
             if attempt == retries: return None
         except Exception as e:
+            # Se loguea: antes cualquier error SQL devolvia None en silencio y el bot
+            # lo interpretaba como "no hay producto" y se lo decia al cliente.
+            print(f"[execute_db_query] {type(e).__name__}: {e} | SQL: {query[:160]}", flush=True)
             if conn:
                 conn.rollback()
                 db_pool.putconn(conn)
@@ -143,13 +146,13 @@ def init_db():
         execute_db_query('''CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor TEXT)''', commit=True)
         # Fotos que mandan los clientes por WhatsApp, para poder verlas después en el panel.
         execute_db_query('''CREATE TABLE IF NOT EXISTS chat_imagenes (id SERIAL PRIMARY KEY, telefono TEXT, imagen BYTEA, imagen_tipo TEXT, fecha TIMESTAMP)''', commit=True)
-        try: execute_db_query("ALTER TABLE chat_sesiones ADD COLUMN advertido INTEGER DEFAULT 0", commit=True)
+        try: execute_db_query("ALTER TABLE chat_sesiones ADD COLUMN IF NOT EXISTS advertido INTEGER DEFAULT 0", commit=True)
         except Exception: pass
-        try: execute_db_query("ALTER TABLE chat_sesiones ADD COLUMN derivado INTEGER DEFAULT 0", commit=True)
+        try: execute_db_query("ALTER TABLE chat_sesiones ADD COLUMN IF NOT EXISTS derivado INTEGER DEFAULT 0", commit=True)
         except Exception: pass
-        try: execute_db_query("ALTER TABLE metricas_campanas ADD COLUMN derivados INTEGER DEFAULT 0", commit=True)
+        try: execute_db_query("ALTER TABLE metricas_campanas ADD COLUMN IF NOT EXISTS derivados INTEGER DEFAULT 0", commit=True)
         except Exception: pass 
-        try: execute_db_query("ALTER TABLE asignaciones_v2 ADD COLUMN fecha_asignacion TIMESTAMP", commit=True)
+        try: execute_db_query("ALTER TABLE asignaciones_v2 ADD COLUMN IF NOT EXISTS fecha_asignacion TIMESTAMP", commit=True)
         except Exception: pass 
         try: execute_db_query("INSERT INTO metricas_campanas (tanda_id, entregados, leidos, respondidos, derivados) VALUES ('ORGANICO', 0, 0, 0, 0) ON CONFLICT (tanda_id) DO NOTHING", commit=True)
         except Exception: pass
@@ -352,6 +355,13 @@ scheduler.start()
 # ==========================================
 # HERRAMIENTAS GEMINI
 # ==========================================
+def _sin_tildes(txt):
+    """minusculas y sin acentos, para comparar lo que escribe el cliente."""
+    t = ''.join(c for c in unicodedata.normalize('NFD', str(txt or ''))
+                if unicodedata.category(c) != 'Mn')
+    return t.strip().lower()
+
+
 def consultar_flujo(familia: str) -> str:
     """Trae las reglas y el orden de preguntas de UNA sola familia (recuperación
     just-in-time desde Supabase). Llámala UNA vez apenas detectes de qué familia
@@ -359,15 +369,23 @@ def consultar_flujo(familia: str) -> str:
     silencio: no la recites.
 
     Args:
-        familia: una palabra exacta: 'Sierras', 'Fresas', 'Mechas', 'Cuchillas'
-                 o 'atencion' (para envíos, afilados, horarios).
+        familia: una palabra exacta: 'Sierras', 'Fresas', 'Mechas', 'Cuchillas',
+                 'Diamante', 'Cabezales' o 'atencion' (envíos, afilados, horarios).
     """
-    fam = (familia or "").strip().capitalize()
-    if fam.lower() == "atencion":
-        fam = "atencion"
+    fam = (familia or "").strip()
+    # Se normalizan tildes y mayusculas: 'atención' o 'SIERRAS' entraban como
+    # familia desconocida y el bot se quedaba sin flujo.
+    fam_norm = ''.join(c for c in unicodedata.normalize('NFD', fam)
+                       if unicodedata.category(c) != 'Mn').lower()
+    ALIAS = {"atencion": "atencion", "sierra": "Sierras", "sierras": "Sierras",
+             "fresa": "Fresas", "fresas": "Fresas", "mecha": "Mechas", "mechas": "Mechas",
+             "cuchilla": "Cuchillas", "cuchillas": "Cuchillas",
+             "diamante": "Diamante", "cabezal": "Cabezales", "cabezales": "Cabezales"}
+    fam = ALIAS.get(fam_norm, fam.capitalize())
     nota = execute_db_query("SELECT nota_familia FROM flujo_familia WHERE familia ILIKE %s", (fam,), fetchone=True)
     if not nota:
-        return "Familia desconocida. Usa: Sierras, Fresas, Mechas, Cuchillas o atencion. No existe 'Diamante'."
+        return ("Familia desconocida. Las validas son: Sierras, Fresas, Mechas, Cuchillas, "
+                "Diamante, Cabezales y atencion. Elegi la mas cercana y volve a llamar.")
     out = [f"FAMILIA {fam}: {nota[0]}"]
     preguntas = execute_db_query(
         "SELECT orden, slot, pregunta, opciones, COALESCE(condicion,'siempre') "
@@ -389,34 +407,61 @@ def consultar_catalogo(familia: str, grupo: str = "", subtipo: str = "",
                        material_corte: str = "", lado: str = "") -> str:
     """Busca el producto YA filtrado y devuelve MÁXIMO 2 opciones (nunca un listado).
     Pasa solo los filtros que ya confirmaste con el cliente; deja en '' los que no sepas.
+    OJO: esta tool NO filtra por medida. Si el cliente ya dio un diámetro, un largo o
+    los dientes, usá consultar_medidas en vez de esta, o le vas a ofrecer una medida
+    que no es la que pidió.
 
     Args:
         familia: 'Sierras', 'Fresas', 'Mechas', 'Cuchillas', 'Diamante' o 'Cabezales'.
         grupo: valor del slot 'grupo' del flujo. Sierras: melamina/madera/aluminio/incisor/
-               triturador/multiple. Fresas: cepillado/canales/moldura/machimbre/finger.
-               Mechas: pasante/ciega/bisagra/integral_cnc/barreno/accesorio. Cuchillas:
-               planas/dorso_ranurado/chipera/cabezales.
+               triturador/multiple/ranurar/seccionadora. Fresas: canales/moldura/machimbre/
+               cepillado/finger/accesorio. Mechas: pasante/ciega/bisagra/integral_cnc/
+               barreno/router_especial/accesorio. Cuchillas: planas/dorso_ranurado/chipera/
+               cabezales. Diamante: disco/incisor/mecha. Cabezales: cepillado/multiperfil/
+               ranurar/finger.
         subtipo: solo fresas moldura: 'individual' o 'combo'. Vacío si no aplica.
-        material_corte: solo cuchillas: 'hss' o 'widia'. Vacío si no aplica.
-        lado: solo mechas, si la máquina lo exige: 'derecha' o 'izquierda'. Vacío si no.
+        material_corte: solo cuchillas planas y dorso_ranurado: 'hss' o 'widia'.
+                        Vacío en chipera y cabezales (no vienen en esos materiales).
+        lado: solo mechas pasante/ciega/bisagra: 'derecha' o 'izquierda'. Dejalo VACÍO si
+              el cliente quiere ambas o no sabe (así se ofrecen las dos versiones).
     """
     try:
-        # Lee el CATALOGO COMPLETO (variantes, 654 filas), no el subset de 82.
-        cond = ["familia ILIKE %s"]; p = [f"%{familia or ''}%"]
+        # Lee el CATALOGO COMPLETO (variantes), no el subset de 82 de 'productos'.
+        # familia va exacta: con ILIKE '%..%' la familia 'Cabezales' se pisaba con
+        # el grupo 'cabezales' de Cuchillas.
+        cond = ["familia ILIKE %s"]; p = [(familia or '').strip()]
         if grupo:          cond.append("grupo = %s");          p.append(grupo)
         if subtipo:        cond.append("subtipo = %s");        p.append(subtipo)
         if material_corte: cond.append("material_corte = %s"); p.append(material_corte)
-        if lado and lado.strip().lower() not in ('ambas', 'ambos', 'indistinto', 'cualquiera', 'los dos', ''):
-            cond.append("(titulo ~* %s OR titulo ~* 'derecha e izquierda|d e i')")
-            p.append(lado)
+        # El giro vive en la columna 'lado' (antes se buscaba en el titulo con un
+        # regex que no matcheaba NADA: pedir giro daba siempre 0 resultados).
+        # Solo se filtra ante un match POSITIVO: 'ambas', 'las dos', 'da igual' o
+        # cualquier texto raro NO filtra y se ofrecen los dos giros. Un default que
+        # adivinara el lado le mostraria al cliente justo el giro contrario.
+        _l = _sin_tildes(lado)
+        _giro = 'derecha' if re.search(r'\bder', _l) else ('izquierda' if re.search(r'\bizq|\bsinis|\bzurd', _l) else None)
+        if _giro:
+            cond.append("lado = %s"); p.append(_giro)
         where = " AND ".join(cond)
-        q = ("SELECT marca, titulo, codigo, uso, spec_raw, diametro_mm "
-             "FROM variantes WHERE " + where +
-             " ORDER BY diametro_mm NULLS LAST, titulo LIMIT 2")
+        # Se ordena por titulo y codigo: antes ordenaba por diametro NULLS LAST y en
+        # las familias donde casi todo tiene diametro NULL devolvia SIEMPRE los 2 mismos.
+        # Si el cliente NO definio el giro, el row_number por 'lado' hace que las 2
+        # opciones sean una de cada giro (antes salian las 2 del mismo lado y el
+        # cliente nunca veia que existia la version contraria).
+        orden = "ORDER BY titulo, diametro_mm NULLS LAST, codigo"
+        if _giro:
+            q = ("SELECT marca, titulo, codigo, uso, spec_raw, diametro_mm "
+                 "FROM variantes WHERE " + where + " " + orden + " LIMIT 2")
+        else:
+            q = ("SELECT marca, titulo, codigo, uso, spec_raw, diametro_mm FROM ("
+                 "SELECT marca, titulo, codigo, uso, spec_raw, diametro_mm, lado, "
+                 "row_number() OVER (PARTITION BY lado " + orden + ") rn "
+                 "FROM variantes WHERE " + where + ") t ORDER BY rn, lado NULLS FIRST, titulo LIMIT 2")
         rows = execute_db_query(q, tuple(p), fetchall=True)
         if not rows:
-            return (f"Sin match exacto (familia={familia} grupo={grupo} subtipo={subtipo}). "
-                    "Pedi UN dato mas, probá otra palabra, o derivá al asesor.")
+            return (f"Sin match exacto (familia={familia} grupo={grupo} subtipo={subtipo} "
+                    f"material={material_corte} lado={lado}). SACA UN FILTRO y volve a "
+                    "llamar (probá sin material o sin lado) antes de decirle que no hay.")
         total = execute_db_query("SELECT count(*) FROM variantes WHERE " + where, tuple(p), fetchone=True)
         cab = "DATOS TECNICOS (max 2, no pegar codigo)"
         if total and total[0] > 2:
@@ -425,12 +470,16 @@ def consultar_catalogo(familia: str, grupo: str = "", subtipo: str = "",
         for r in rows:  # r = (marca, titulo, codigo, uso, spec_raw, diametro)
             texto += f"- {r[1]} ({r[0]}). cod_oculto:{r[2]}. Uso:{r[3]}. Specs:{r[4]}\n"
         return texto
-    except Exception:
-        return "Error DB."
+    except Exception as e:
+        # Antes devolvia "Error DB." a secas y el bot lo leia como "no hay stock"
+        # y se lo decia al cliente. Ahora queda claro que es un fallo tecnico.
+        print(f"[consultar_catalogo] {type(e).__name__}: {e}", flush=True)
+        return ("FALLO TECNICO de la busqueda (no es que no haya stock). Reintenta una vez "
+                "con menos filtros; si vuelve a fallar, derivá al asesor sin dar detalles.")
 
 
-def consultar_medidas(familia: str, diametro_mm: str = "", dientes: str = "", palabra_clave: str = "", subgrupo: str = "") -> str:
-    """Devuelve variantes con specs EXACTAS (diametro, dientes Z, espesor, eje) desde
+def consultar_medidas(familia: str, diametro_mm: str = "", dientes: str = "", palabra_clave: str = "", subgrupo: str = "", largo_mm: str = "", lado: str = "") -> str:
+    """Devuelve variantes con specs EXACTAS (diametro, dientes Z, largo, espesor, eje) desde
     la tabla 'variantes' (catalogo completo). Usala para encontrar el producto y para
     responder medidas/dientes. Nunca le digas el codigo al cliente.
 
@@ -439,23 +488,49 @@ def consultar_medidas(familia: str, diametro_mm: str = "", dientes: str = "", pa
         diametro_mm: diametro en mm si el cliente lo dio (ej '300'). Vacio si no.
         dientes: cantidad de dientes Z si el cliente lo pidio (ej '96'). Vacio si no.
         palabra_clave: material/uso (ej 'melamina', 'madera', 'aluminio', 'incisor'). Vacio si no.
-        subgrupo: SOLO sierras, para no confundir tipos: 'melamina', 'madera', 'aluminio',
-                  'incisor', 'triturador', 'multiple', 'ranurar', 'seccionadora'. Vacio si no aplica.
+        subgrupo: SOLO sierras y diamante, para no confundir tipos: 'melamina', 'madera',
+                  'aluminio', 'incisor', 'triturador', 'multiple', 'ranurar', 'seccionadora'.
+                  Vacio en las demas familias.
+        largo_mm: SOLO cuchillas: el largo en mm (ej '260'), que es el ancho de madera que
+                  cepilla la maquina. Es el dato principal de esa familia, NO el diametro.
+        lado: SOLO mechas pasante/ciega/bisagra y sierras trituradoras: 'derecha' o
+              'izquierda'. Dejalo VACÍO si el cliente quiere ambas o no sabe.
     """
     try:
+        def _num(x):
+            """'3,5 mm' -> 3.5. Antes borraba la coma y devolvia 35."""
+            m = re.search(r'(\d+(?:[.,]\d+)?)', str(x))
+            return float(m.group(1).replace(',', '.')) if m else None
         def _int(x):
-            d = ''.join(ch for ch in str(x) if ch.isdigit())
-            return int(d) if d else None
-        cond = ["familia ILIKE %s"]; p = [f"%{familia or ''}%"]
-        d = _int(diametro_mm) if diametro_mm else None
+            n = _num(x)
+            return int(round(n)) if n is not None else None
+        fam = (familia or '').strip()
+        cond = ["familia ILIKE %s"]; p = [fam]
+        # diametro_mm es entero en la DB: si el cliente dice 3,5 no hay match exacto
+        # y se resuelve por cercania mas abajo (antes redondeaba a 4 en silencio).
+        dnum = _num(diametro_mm) if diametro_mm else None
+        d = int(dnum) if (dnum is not None and float(dnum).is_integer()) else None
         z = _int(dientes) if dientes else None
-        if d: cond.append("diametro_mm = %s"); p.append(d)
+        lg = _num(largo_mm) if largo_mm else None
+        # El diametro matchea la medida fija O el rango de una herramienta regulable
+        # (ej un avellanador "5-10mm" tiene que salir si el cliente pide 8mm).
+        if dnum is not None:
+            cond.append("(diametro_mm = %s OR (%s BETWEEN diametro_min_mm AND diametro_max_mm))")
+            p += [d if d is not None else -1, dnum]
         if z: cond.append("dientes_z = %s"); p.append(z)
-        # subgrupo: explicito, o auto-detectado de la palabra clave (sierras). Asi
-        # 'melamina' trae SOLO sierras de melamina y no incisores/trituradores.
+        if lg: cond.append("largo_mm = %s"); p.append(lg)
+        # Mismo criterio que consultar_catalogo: solo se filtra ante un match positivo;
+        # 'ambas' o cualquier texto raro NO filtra y se ofrecen los dos giros.
+        _lg = _sin_tildes(lado)
+        _giro = 'derecha' if re.search(r'\bder', _lg) else ('izquierda' if re.search(r'\bizq|\bsinis|\bzurd', _lg) else None)
+        if _giro: cond.append("lado = %s"); p.append(_giro)
+        # subgrupo: explicito, o auto-detectado de la palabra clave. SOLO tiene sentido
+        # en Sierras y Diamante: en las demas familias subgrupo es NULL en el 100% de
+        # las filas, y auto-mapear 'madera' ahi garantizaba 0 resultados.
         sg = (subgrupo or "").strip().lower()
         pk = (palabra_clave or "").strip().lower()
-        if not sg and pk:
+        usa_subgrupo = fam.lower() in ('sierras', 'diamante')
+        if usa_subgrupo and not sg and pk:
             for _k, _v in {"melamina": "melamina", "aglomerado": "melamina", "mdf": "melamina",
                            "bilaminad": "melamina", "aluminio": "aluminio", "incisor": "incisor",
                            "triturador": "triturador", "seccionadora": "seccionadora",
@@ -463,18 +538,58 @@ def consultar_medidas(familia: str, diametro_mm: str = "", dientes: str = "", pa
                            "madera": "madera"}.items():
                 if _k in pk:
                     sg = _v; break
-        if sg:
+        if sg and usa_subgrupo:
             cond.append("subgrupo = %s"); p.append(sg)
         elif palabra_clave:
-            cond.append("(uso ILIKE %s OR titulo ILIKE %s OR spec_raw ILIKE %s)")
-            kw = f"%{palabra_clave}%"; p += [kw, kw, kw]
+            # Fuera de Sierras/Diamante la palabra clave busca en grupo/uso/titulo/spec.
+            # Se compara SIN TILDES (el catalogo dice "en ángulo"/"cóncavo" y nadie
+            # escribe los acentos) y POR PALABRAS: se exigen todas las significativas,
+            # asi "Fresa de Zocalo Simple y Contramarco" encuentra "Zócalo Simple y
+            # Contramarco HM" aunque el orden y las palabras de relleno no coincidan.
+            VACIAS = {'fresa', 'fresas', 'mecha', 'mechas', 'sierra', 'sierras', 'cuchilla',
+                      'cuchillas', 'cabezal', 'cabezales', 'de', 'del', 'la', 'el', 'los',
+                      'las', 'para', 'con', 'y', 'o', 'un', 'una', 'hm'}
+            tokens = [t for t in re.split(r'[^0-9a-zA-Záéíóúñ/]+', _sin_tildes(palabra_clave))
+                      if len(t) > 1 and t not in VACIAS][:5]
+            if not tokens:
+                tokens = [_sin_tildes(palabra_clave)]
+            for t in tokens:
+                cond.append("(sin_tildes(grupo) ILIKE %s OR sin_tildes(uso) ILIKE %s "
+                            "OR sin_tildes(titulo) ILIKE %s OR sin_tildes(spec_raw) ILIKE %s)")
+                kw = f"%{t}%"; p += [kw, kw, kw, kw]
         where = " AND ".join(cond)
-        q = ("SELECT titulo, marca, diametro_mm, dientes_z, espesor_mm, eje_mm, spec_raw, codigo "
+        q = ("SELECT titulo, marca, diametro_mm, dientes_z, espesor_mm, eje_mm, spec_raw, codigo, "
+             "largo_mm, ancho_mm, lado, diametro_min_mm, diametro_max_mm "
              "FROM variantes WHERE " + where +
-             " ORDER BY diametro_mm NULLS LAST, dientes_z NULLS LAST LIMIT 4")
+             " ORDER BY diametro_mm NULLS LAST, largo_mm NULLS LAST, dientes_z NULLS LAST LIMIT 4")
         rows = execute_db_query(q, tuple(p), fetchall=True)
         if not rows:
-            return f"Sin variante exacta (familia={familia} D={diametro_mm} Z={dientes}). Pedi otra medida o deriva al asesor."
+            # En vez de cerrar con "no me figura" (que el prompt prohibe), se le pasan
+            # las medidas REALES mas cercanas para que ofrezca una alternativa concreta.
+            pedido = lg if lg else dnum
+            if pedido:
+                col = "largo_mm" if lg else "diametro_mm"
+                # Se reusan TODOS los filtros menos el de la medida que se relaja, y se
+                # excluye el valor pedido: si no, la tool decia "no hay 5mm" y a
+                # continuacion ofrecia 5mm (era de otro grupo que el filtro descartaba).
+                cond2, p2, i = [], [], 0
+                for c in cond:
+                    n = c.count('%s')
+                    if col not in c:
+                        cond2.append(c); p2 += p[i:i + n]
+                    i += n
+                cond2 += [f"{col} IS NOT NULL", f"{col} <> %s"]; p2.append(pedido)
+                r2 = execute_db_query(
+                    f"SELECT {col} FROM variantes WHERE " + " AND ".join(cond2) +
+                    f" GROUP BY {col} ORDER BY abs({col}::numeric - %s::numeric) LIMIT 3",
+                    tuple(p2) + (pedido,), fetchall=True)
+                if r2:
+                    op = ", ".join(f"{float(x[0]):g}mm" for x in r2)
+                    return (f"No hay {pedido:g}mm en {fam}. Las medidas mas cercanas que SI tenemos "
+                            f"son: {op}. Ofrecele esas (volve a llamar con una de ellas), no le digas "
+                            "que no tenemos.")
+            return (f"Sin variante exacta (familia={familia} D={diametro_mm} Z={dientes} "
+                    f"largo={largo_mm}). Volve a llamar con MENOS filtros antes de responderle.")
         total = execute_db_query("SELECT count(*) FROM variantes WHERE " + where, tuple(p), fetchone=True)
         cab = "MEDIDAS EXACTAS (deci specs al cliente, NUNCA el codigo)"
         if total and total[0] > len(rows):
@@ -483,13 +598,22 @@ def consultar_medidas(familia: str, diametro_mm: str = "", dientes: str = "", pa
         for r in rows:
             partes = [f"{r[0]} ({r[1]})"]
             if r[2]: partes.append(f"D={r[2]}mm")
+            # Regulable: se dice el RANGO, no una medida fija que la herramienta no tiene.
+            elif r[11] and r[12]: partes.append(f"REGULABLE de {r[11]} a {r[12]}mm")
             if r[3]: partes.append(f"Z={r[3]} dientes")
+            if r[8]: partes.append(f"largo={r[8]}mm")
+            if r[9]: partes.append(f"ancho={r[9]}mm")
             if r[4]: partes.append(f"esp={r[4]}mm")
             if r[5]: partes.append(f"eje={r[5]}mm")
-            out += "- " + " ".join(partes) + f"  [cod_oculto:{r[7]}]\n"
+            if r[10]: partes.append(f"giro={r[10]}")
+            # spec_raw es la ficha textual del fabricante: la ve el modelo para no
+            # inventar medidas cuando las columnas parseadas no alcanzan.
+            out += "- " + " ".join(partes) + f"  (ficha: {r[6]}) [cod_oculto:{r[7]}]\n"
         return out
-    except Exception:
-        return "Error DB."
+    except Exception as e:
+        print(f"[consultar_medidas] {type(e).__name__}: {e}", flush=True)
+        return ("FALLO TECNICO de la busqueda (no es que no haya stock). Reintenta una vez "
+                "con menos filtros; si vuelve a fallar, derivá al asesor sin dar detalles.")
 
 # ==========================================
 # PROMPT BASE (corto y estable: el flujo por familia vive en SQL, no acá)
@@ -505,11 +629,13 @@ BASE_CONOCIMIENTO = "\n".join([
     "5. Familias validas: Sierras, Fresas, Mechas, Cuchillas, Diamante y Cabezales.",
     "",
     "COMO TRABAJAR (recuperacion just-in-time, NO inventes el flujo):",
-    "- Detecta la familia: sierra/disco/cortar placa->Sierras; fresa/router/tupi/moldura/cepillar/CNC->Fresas; mecha/broca/perforar/bisagra->Mechas; cuchilla/cepillo/moldurera/chipera->Cuchillas; envios/afilado/horario/direccion/ubicacion/donde estan->atencion.",
+    "- Detecta la familia: sierra/disco/cortar placa->Sierras; fresa/router/tupi/moldura/cepillar/CNC->Fresas; mecha/broca/perforar/bisagra->Mechas; cuchilla/cepillo/moldurera/chipera->Cuchillas; cabezal/portacuchilla->Cabezales; diamante/PCD->Diamante (gana sobre cualquier otra: 'fresa de diamante' es Diamante, no Fresas); envios/afilado/horario/direccion/ubicacion/donde estan/precio/pago/factura->atencion.",
+    "- Si preguntan por MARCA (que marca manejan, si son Freud, etc.), llama consultar_flujo(familia) ANTES de contestar: la marca de cada familia esta ahi. Nunca la adivines.",
     "- Apenas la sepas, llama consultar_flujo(familia) UNA vez: te dice que preguntar, en que orden, las opciones y a que dato mapea cada respuesta. Segui ESE flujo, no uno tuyo.",
     "- Si es ambiguo ('hola'/'busco algo'): UNA pregunta corta y abierta. No listes las familias como menu.",
     "- Cuando tengas grupo (y subtipo/material si aplica), llama consultar_catalogo(familia, grupo, subtipo, material_corte, lado). Devuelve 1-2 opciones: ofrecelas.",
-    "- Si el cliente pide una MEDIDA puntual o pregunta cuantos dientes / que medidas tiene, llama consultar_medidas(familia, diametro_mm, dientes, palabra_clave). Trae specs EXACTAS (diametro, dientes Z, espesor, eje). NO inventes ni digas 'no tengo el dato': consultá esta tool.",
+    "- Si el cliente pide una MEDIDA puntual o pregunta cuantos dientes / que medidas tiene, llama consultar_medidas(familia, diametro_mm, dientes, palabra_clave, largo_mm). Trae specs EXACTAS. En CUCHILLAS la medida es el largo: pasala en largo_mm, NO en diametro_mm. NO inventes ni digas 'no tengo el dato': consultá esta tool.",
+    "- Si una busqueda vuelve vacia, SACA UN FILTRO y volve a llamar antes de decirle nada al cliente. Nunca le pases el texto de la tool tal cual.",
     "- Si el cliente menciona una herramienta de OTRA MARCA (no Freud/WoodTools), llama buscar_specs_otra_marca(marca, producto) para sacar SOLO los datos tecnicos de esa herramienta, y con esos datos buscá NUESTRO equivalente con consultar_medidas/consultar_catalogo. Ofrecelo como alternativa. Si el modelo no esta claro, pedí UN detalle (medida o uso). PROHIBIDO hablar de precios o promociones (ni de la otra marca ni nuestros).",
     "",
     "ANTI-REPETICION Y TONO HUMANO (lo MAS importante):",
@@ -519,6 +645,8 @@ BASE_CONOCIMIENTO = "\n".join([
     "- Tras 2 intentos sin definir un dato: mostrá la opcion mas comun o lo que ya tengas y AVANZA, o deriva al asesor. PROHIBIDO pedir el mismo dato 3 veces o mas.",
     "- Saluda UNA sola vez y corto. No repitas saludos ni formulas largas de cortesia. Reconocé lo que dijo el cliente antes de seguir ('Dale, para melamina entonces...') y varia las palabras: no uses siempre la misma frase.",
     "- NUNCA digas 'no tengo el dato' ni 'no me figura': para specs usa consultar_medidas.",
+    "- UNICA EXCEPCION: precio, stock, formas de pago, factura, garantia y plazos NO los tenes. No los inventes ni los afirmes jamas: deci que eso lo confirma el vendedor y pasá el enlace.",
+    "- Si el cliente responde algo que no era la respuesta a tu pregunta, DALO POR RESPONDIDO igual y avanza. Nunca repitas la misma pregunta dos veces seguidas.",
 ])
 
 def obtener_aprendizajes(ambito):
@@ -588,6 +716,7 @@ def obtener_prompt_personalizado(telefono, modo_bot):
         f"- Por defecto es {nombre_vend}: usá SU enlace y, si lo nombrás, decí ese nombre.",
         "- Si el cliente pide EXPRESAMENTE otro vendedor por nombre, usá el enlace de ESE vendedor de la lista y nombralo a él.",
         "- NUNCA menciones un vendedor distinto al del enlace que enviás.",
+        "- En el enlace, reemplazá SIEMPRE [Prod] por el producto con sus medidas (ej '-%20Sierra%20Melamina%20D=300mm%20Z=96'). Si son varios, uno por linea separados por %0A-%20. JAMAS mandes el enlace con el texto [Prod] adentro.",
         "ENLACES POR VENDEDOR:",
         vendedores_links,
     ])
@@ -599,9 +728,13 @@ def guia_cortes_fresas():
     """Guía (desde SQL, tabla fresas_cortes) para identificar la fresa por el CORTE
     que deja en la madera. Se inyecta cuando el cliente manda una foto."""
     rows = execute_db_query(
-        "SELECT nombre, descripcion_corte FROM fresas_cortes WHERE activo = true ORDER BY id",
-        fetchall=True) or []
-    return "\n".join(f"- {r[0]}: {r[1]}" for r in rows)
+        "SELECT nombre, descripcion_corte, grupo, palabras_clave FROM fresas_cortes "
+        "WHERE activo = true ORDER BY id", fetchall=True) or []
+    # Se incluye grupo y palabras_clave: sin el grupo el bot no sabia con que valor
+    # buscar despues, y las palabras_clave estaban cargadas pero no se usaban.
+    return "\n".join(
+        f"- {r[0]} [grupo={r[2] or 'moldura'}]: {r[1]}" + (f" (palabras: {r[3]})" if r[3] else "")
+        for r in rows)
 
 def identificar_fresa_visual(img):
     """Identifica la fresa de un corte en 2 pasos:
@@ -625,9 +758,15 @@ def identificar_fresa_visual(img):
         # --- Buscar foto de referencia del candidato ---
         ref_img = None
         if nombre:
+            # Match EXACTO primero: con ILIKE '%nombre%' un candidato "Fresa Recta"
+            # traia la foto de "Fresa Recta con Incisor" (otra fresa distinta).
             row = execute_db_query(
                 "SELECT imagen FROM fresas_cortes WHERE activo = true AND imagen IS NOT NULL "
-                "AND nombre ILIKE %s LIMIT 1", (f"%{nombre}%",), fetchone=True)
+                "AND nombre ILIKE %s ORDER BY length(nombre) LIMIT 1", (nombre,), fetchone=True)
+            if not row:
+                row = execute_db_query(
+                    "SELECT imagen FROM fresas_cortes WHERE activo = true AND imagen IS NOT NULL "
+                    "AND nombre ILIKE %s ORDER BY length(nombre) LIMIT 1", (f"%{nombre}%",), fetchone=True)
             if row and row[0]:
                 try:
                     ref_img = Image.open(io.BytesIO(bytes(row[0])))
@@ -676,6 +815,16 @@ def buscar_specs_otra_marca(marca: str, producto: str) -> str:
     except Exception:
         return "No pude buscar los datos de esa marca. Pedile diámetro, dientes y uso, y busco un equivalente."
 
+def _texto_de(respuesta):
+    """Texto de una respuesta de Gemini sin usar el accesor .text, que lanza excepcion
+    cuando el candidato viene sin parts (pasa cada tanto con 2.5 Flash)."""
+    try:
+        partes = respuesta.candidates[0].content.parts
+        return "".join(getattr(p, "text", "") or "" for p in partes).strip()
+    except Exception:
+        return ""
+
+
 def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None, img_id=None):
     with get_chat_lock(telefono):
         if texto_entrante and "reset" in texto_entrante.strip().lower():
@@ -717,7 +866,9 @@ def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None, img_i
                     "ANÁLISIS VISUAL AUTOMÁTICO (válido si la foto es un CORTE de madera):",
                     analisis_corte,
                     "- Si la foto es un corte: usá ese análisis, nombrá la fresa y buscá el producto con",
-                    "  consultar_catalogo('Fresas', grupo) o consultar_medidas. Si duda entre 2, mostrá las 2.",
+                    "  consultar_medidas('Fresas', palabra_clave=<nombre de la fresa de la guía>). Ese nombre",
+                    "  coincide con el título real del catálogo. Si no trae nada, recién ahí probá",
+                    "  consultar_catalogo('Fresas', <el grupo= que figura en la guía>). Si duda entre 2, mostrá las 2.",
                     "- Si la foto es una HERRAMIENTA (fresa/sierra/mecha) u otra cosa: ignorá el análisis y",
                     "  reconocela vos mirando la imagen.",
                     "- Si no se entiende, pedí otra foto más clara o que describa qué hace.",
@@ -726,8 +877,17 @@ def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None, img_i
                 respuesta = chat.send_message([vision, imagen_pil, texto_entrante or ""])
             else:
                 respuesta = chat.send_message(texto_entrante)
-                
-            txt_res = respuesta.text
+
+            txt_res = _texto_de(respuesta)
+            if not txt_res:
+                # Gemini a veces devuelve un candidato VACIO (finish_reason=STOP sin
+                # parts). Antes eso tiraba excepcion, el cliente recibia un relleno y
+                # su mensaje se perdia del historial. Se reintenta una vez.
+                print("[gemini] respuesta vacia, reintento", flush=True)
+                txt_res = _texto_de(chat.send_message(
+                    "(seguí la conversación y respondé al cliente en una sola frase)"))
+            if not txt_res:
+                txt_res = "Perdón, se me cortó. ¿Me repetís lo último?"
             match = re.search(r'(https://woodtools-webhook\.onrender\.com/wa/[^\s<>]+)', txt_res)
             
             txt_limpio = re.sub(r'\[AGENDADO:\s*.*?\]', '', txt_res, flags=re.IGNORECASE).strip()
