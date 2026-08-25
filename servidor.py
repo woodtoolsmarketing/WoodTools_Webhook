@@ -355,6 +355,11 @@ scheduler.start()
 # ==========================================
 # HERRAMIENTAS GEMINI
 # ==========================================
+# Subir cuando cambie el contrato de las tools o el flujo en SQL, para poder chequear
+# desde GET / si lo desplegado esta al dia con la DB.
+VERSION_CONOCIMIENTO = "2026-08-25"
+
+
 def _sin_tildes(txt):
     """minusculas y sin acentos, para comparar lo que escribe el cliente."""
     t = ''.join(c for c in unicodedata.normalize('NFD', str(txt or ''))
@@ -923,7 +928,14 @@ def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None, img_i
 # RUTAS 
 # ==========================================
 @app.route('/', methods=['GET', 'POST'])
-def inicio(): return "🚀 Webhook WoodTools + IA Gemini 🚀", 200
+def inicio():
+    # Render NO auto-despliega este servicio: sin un marcador de version no habia forma
+    # de saber si lo que esta corriendo es el ultimo commit o una version vieja.
+    # RENDER_GIT_COMMIT lo inyecta Render solo; VERSION_CONOCIMIENTO se sube a mano
+    # cuando cambia el contrato de las tools o el flujo en SQL.
+    commit = (os.environ.get('RENDER_GIT_COMMIT') or 'local')[:7]
+    return (f"🚀 Webhook WoodTools + IA Gemini 🚀 | commit:{commit} | "
+            f"conocimiento:{VERSION_CONOCIMIENTO}"), 200
 
 @app.route('/wa/<tanda_id>/<telefono_cliente>/<vendedor>', methods=['GET'])
 def redirect_wa(tanda_id, telefono_cliente, vendedor):
