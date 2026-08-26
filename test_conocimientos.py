@@ -31,9 +31,14 @@ chk(r.startswith('Familia desconocida'), "consultar_flujo('Martillos') deberia s
 chk("No existe 'Diamante'" not in r, "el mensaje de error sigue negando Diamante")
 
 # ---------- 2. consultar_catalogo: todo familia+grupo real debe devolver algo ----------
+def hay_productos(r):
+    """Al menos una linea de producto ("- Titulo (Marca)..."), sea cual sea el encabezado."""
+    return any(l.startswith('- ') for l in (r or '').splitlines())
+
 for fam, gru, n in FAM_GRUPOS:
     r = servidor.consultar_catalogo(fam, gru or '')
-    chk('DATOS TECNICOS' in r, f"consultar_catalogo({fam},{gru}) [{n} filas] -> {r[:60]}")
+    chk(hay_productos(r), f"consultar_catalogo({fam},{gru}) [{n} filas] -> {r[:60]}")
+    chk(r.startswith('[NOTA INTERNA'), f"consultar_catalogo({fam},{gru}) no arranca con la nota interna")
 
 # ---------- 3. no se pisan las familias entre si ----------
 r = servidor.consultar_catalogo('Cabezales')
@@ -63,27 +68,44 @@ for fam in ['Sierras', 'Fresas', 'Mechas', 'Cuchillas', 'Diamante', 'Cabezales',
             f"consultar_medidas({fam!r},{d[:20]!r}) -> {str(r)[:70]}")
 
 # ---------- 6. la medida "mas cercana" que sugiere TIENE que existir ----------
+# La tool contesta "ACCION: ofrecele 250mm, 240mm, 230mm en este mismo mensaje ...".
+# Se parsea SOLO la lista ofrecida: el resto del texto nombra la medida pedida
+# (en el "PROHIBIDO cotizar Nmm") y no hay que confundirla con una sugerencia.
+RE_OFRECE = re.compile(r'ofrecele\s+(.+?),\s*que son las medidas', re.I)
+
+def ofrecidas(txt):
+    m = RE_OFRECE.search(txt or '')
+    return [float(x) for x in re.findall(r'(\d+(?:\.\d+)?)mm', m.group(1))] if m else []
+
 for fam, col, pedidos in [('Sierras', 'diametro_mm', ['280', '999', '1']),
-                          ('Mechas', 'diametro_mm', ['3,5', '11', '500']),
-                          ('Cuchillas', 'largo_mm', None)]:
-    for pedido in (pedidos or []):
+                          ('Mechas', 'diametro_mm', ['3,5', '11', '500'])]:
+    for pedido in pedidos:
         r = servidor.consultar_medidas(fam, pedido, '', '', '')
-        for m in re.findall(r'(\d+(?:\.\d+)?)mm', r.split('cercanas que SI tenemos son:')[-1]) \
-                 if 'cercanas que SI tenemos' in r else []:
+        sug = ofrecidas(r)
+        chk(not ('ofrecele' in r and not sug),
+            f"{fam}/{pedido}: dice que ofrece medidas pero no se pudo parsear ninguna")
+        for m in sug:
             ex = servidor.execute_db_query(
                 f"SELECT 1 FROM variantes WHERE familia ILIKE %s AND {col} = %s LIMIT 1",
-                (fam, float(m)), fetchone=True)
+                (fam, m), fetchone=True)
             chk(bool(ex), f"{fam}: sugirio {m}mm y NO existe en el catalogo")
+            chk(abs(m - float(pedido.replace(',', '.'))) > 1e-9,
+                f"{fam}: dijo que no hay {pedido} y despues lo ofrecio")
 for pedido in ['260', '99', '2000']:
     r = servidor.consultar_medidas('Cuchillas', '', '', '', '', pedido)
-    if 'cercanas que SI tenemos' in r:
-        for m in re.findall(r'(\d+(?:\.\d+)?)mm', r.split('cercanas que SI tenemos son:')[-1]):
-            ex = servidor.execute_db_query(
-                "SELECT 1 FROM variantes WHERE familia ILIKE 'Cuchillas' AND largo_mm = %s LIMIT 1",
-                (float(m),), fetchone=True)
-            chk(bool(ex), f"Cuchillas: sugirio largo {m}mm y NO existe")
-        chk(pedido + 'mm' not in r.split('son:')[-1],
-            f"Cuchillas: dijo 'no hay {pedido}' y despues ofrecio {pedido}")
+    for m in ofrecidas(r):
+        ex = servidor.execute_db_query(
+            "SELECT 1 FROM variantes WHERE familia ILIKE 'Cuchillas' AND largo_mm = %s LIMIT 1",
+            (m,), fetchone=True)
+        chk(bool(ex), f"Cuchillas: sugirio largo {m}mm y NO existe")
+        chk(abs(m - float(pedido)) > 1e-9,
+            f"Cuchillas: dijo que no hay {pedido} y despues lo ofrecio")
+
+# ---------- 6b. toda respuesta vacia tiene que traer una ACCION, nunca un "no hay" ----------
+for fam, args in [('Cuchillas', ('', '', '', '', '260')), ('Sierras', ('280', '', '', '')),
+                  ('Fresas', ('9999', '', '', '')), ('Mechas', ('777', '', '', ''))]:
+    r = servidor.consultar_medidas(fam, *args)
+    chk('[NOTA INTERNA' in r, f"{fam}: respuesta sin nota interna -> {r[:70]}")
 
 # ---------- 7. ningun diametro devuelto puede ser inventado ----------
 rows = servidor.execute_db_query(
@@ -108,7 +130,9 @@ for fn in (servidor.consultar_catalogo, servidor.consultar_medidas):
 for fam, orden, slot, cond in servidor.execute_db_query(
         "SELECT familia, orden, slot, COALESCE(condicion,'') FROM flujo_pregunta ORDER BY familia, orden",
         fetchall=True):
-    chk(slot in params or 'NO filtra' in cond or 'no filtra' in cond.lower(),
+    exento = any(t in cond.lower() for t in
+                 ('no filtra', 'no es un filtro', 'nunca lo pases a una tool'))
+    chk(slot in params or exento,
         f"flujo_pregunta {fam}/{orden}: slot '{slot}' no es parametro de ninguna tool")
 
 # ---------- 10. cada opcion del flujo tiene que existir en el catalogo ----------
@@ -156,10 +180,25 @@ for fam, in servidor.execute_db_query(
         chk(not re.search(r'Marcas?:[^.]*\b' + falsa + r'\b', nota[0]),
             f"{fam}: la nota nombra la marca '{falsa}' que NO existe en esa familia (reales: {reales})")
 
+# ---------- 12. el saneador impide que salga la tripa de una tool por WhatsApp ----------
+crudo = servidor.consultar_medidas('Mechas', '35', '', 'bisagra', '')
+limpio = servidor._limpiar_para_cliente(crudo)
+for marcador in ['cod_oculto', '(ficha:', 'NOTA INTERNA', 'PROHIBIDO', 'busqueda vacia']:
+    chk(marcador not in limpio, f"el saneador dejo pasar '{marcador}'")
+chk(any(l.startswith('- ') for l in limpio.splitlines()),
+    "el saneador se llevo tambien las lineas de producto")
+for crudo2 in [servidor.consultar_catalogo('Mechas', 'bisagra'),
+               servidor.consultar_medidas('Cuchillas', '', '', '', '', '260'),
+               servidor.consultar_catalogo('Cuchillas', 'planas', '', 'hss')]:
+    l2 = servidor._limpiar_para_cliente(crudo2)
+    for marcador in ['cod_oculto', '(ficha:', 'NOTA INTERNA']:
+        chk(marcador not in l2, f"el saneador dejo pasar '{marcador}' en otra salida")
+
 print()
 if fallos:
     print("FALLOS:", len(fallos))
     for f in fallos[:40]:
         print("  -", f)
 else:
-    print("SIN FALLOS: los 11 bloques de regresion pasan.")
+    print("SIN FALLOS: los 12 bloques de regresion pasan.")
+
