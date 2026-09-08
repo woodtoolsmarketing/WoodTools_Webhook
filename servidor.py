@@ -22,7 +22,7 @@ import re
 import io
 from PIL import Image
 import threading
-from threading import Lock
+from threading import Lock, RLock
 from apscheduler.schedulers.background import BackgroundScheduler
 import unicodedata
 import time
@@ -97,7 +97,10 @@ processed_msg_ids = set()
 def get_chat_lock(telefono):
     with locks_lock:
         if telefono not in chat_locks:
-            chat_locks[telefono] = Lock()
+            # RLock (reentrante): el webhook toma el lock y adentro puede llamar a
+            # _archivar_y_cerrar, que vuelve a tomarlo. Y serializa el archivado del
+            # scheduler contra el del webhook para el mismo teléfono.
+            chat_locks[telefono] = RLock()
         return chat_locks[telefono]
 
 def hora_arg():
@@ -151,7 +154,11 @@ def init_db():
         try: execute_db_query("ALTER TABLE chat_sesiones ADD COLUMN IF NOT EXISTS derivado INTEGER DEFAULT 0", commit=True)
         except Exception: pass
         try: execute_db_query("ALTER TABLE metricas_campanas ADD COLUMN IF NOT EXISTS derivados INTEGER DEFAULT 0", commit=True)
-        except Exception: pass 
+        except Exception: pass
+        # Distingue en el panel una derivacion real (recibio el enlace al vendedor) de un
+        # abandono cerrado por inactividad: ambos viven en chats_derivados.
+        try: execute_db_query("ALTER TABLE chats_derivados ADD COLUMN IF NOT EXISTS derivado INTEGER DEFAULT 0", commit=True)
+        except Exception: pass
         try: execute_db_query("ALTER TABLE asignaciones_v2 ADD COLUMN IF NOT EXISTS fecha_asignacion TIMESTAMP", commit=True)
         except Exception: pass 
         try: execute_db_query("INSERT INTO metricas_campanas (tanda_id, entregados, leidos, respondidos, derivados) VALUES ('ORGANICO', 0, 0, 0, 0) ON CONFLICT (tanda_id) DO NOTHING", commit=True)
@@ -253,10 +260,23 @@ def guardar_imagen_chat(telefono, contenido, mime, pil=None):
 # ==========================================
 def registrar_metrica(evento, telefono):
     """
-    Registra un evento de métrica para un cliente.
-    Eventos válidos: 'delivered', 'read', 'responded', 'derivado'
+    Registra un evento de métrica para un cliente, UNA sola vez por cliente/tanda/evento.
+    Eventos válidos: 'delivered', 'read', 'responded', 'derivado'.
+    Los eventos de un contacto SIN campaña asignada solo se cuentan si son 'derivado'
+    (bajo la tanda 'ORGANICO'); el resto no aplica a un contacto orgánico.
     """
     try:
+        # Mapeo limpio y correcto de evento → columna SQL
+        columna_map = {
+            'delivered': 'entregados',
+            'read':      'leidos',
+            'responded': 'respondidos',
+            'derivado':  'derivados',
+        }
+        columna = columna_map.get(evento)
+        if not columna:
+            return
+
         tel_10 = extraer_10_digitos(telefono)
         res = execute_db_query(
             "SELECT tanda_id FROM asignaciones_v2 WHERE telefono_cliente = %s",
@@ -264,26 +284,41 @@ def registrar_metrica(evento, telefono):
         )
         if res and res[0]:
             tanda = res[0]
-
-            # Insertar en tracking para deduplicar (ON CONFLICT DO NOTHING evita doble conteo)
-            execute_db_query(
-                "INSERT INTO tracking_metricas (tanda_id, telefono, evento) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-                (tanda, tel_10, evento), commit=True
+        elif evento == 'derivado':
+            # Derivación de un contacto SIN campaña -> se cuenta como orgánica (antes se perdía).
+            # Solo aplicamos el fallback a 'derivado' (delivered/read/responded no aplican a un
+            # orgánico). Y SOLO si esta persona no fue ya contada como derivada en ninguna tanda:
+            # así un ex-cliente de campaña cuya asignación se borró y vuelve a derivarse no suma
+            # doble (su tanda original + ORGANICO). tracking_metricas nunca se purga, así que
+            # esta marca persiste.
+            ya = execute_db_query(
+                "SELECT 1 FROM tracking_metricas WHERE telefono = %s AND evento = 'derivado' LIMIT 1",
+                (tel_10,), fetchone=True
             )
+            if ya:
+                return
+            tanda = 'ORGANICO'
+        else:
+            return
 
-            # Mapeo limpio y correcto de evento → columna SQL
-            columna_map = {
-                'delivered': 'entregados',
-                'read':      'leidos',
-                'responded': 'respondidos',
-                'derivado':  'derivados',
-            }
-            columna = columna_map.get(evento)
-            if columna:
-                execute_db_query(
-                    f"UPDATE metricas_campanas SET {columna} = {columna} + 1 WHERE tanda_id = %s",
-                    (tanda,), commit=True
-                )
+        # Aseguramos la fila de la tanda para que el UPDATE no sea un no-op silencioso.
+        execute_db_query(
+            "INSERT INTO metricas_campanas (tanda_id) VALUES (%s) ON CONFLICT (tanda_id) DO NOTHING",
+            (tanda,), commit=True
+        )
+        # Conteo dedup y ATÓMICO en UNA sola sentencia: el INSERT en tracking (que deduplica por
+        # cliente/tanda/evento) y el +1 en metricas van juntos. Si el evento ya estaba contado,
+        # el ON CONFLICT no inserta, COUNT(*) sobre 'ins' da 0 y el +1 no ocurre. Antes eran dos
+        # commits separados: si el UPDATE fallaba tras commitear el tracking, el contador
+        # quedaba con un -1 permanente (el reintento chocaba con el ON CONFLICT).
+        execute_db_query(
+            "WITH ins AS ("
+            "  INSERT INTO tracking_metricas (tanda_id, telefono, evento) VALUES (%s, %s, %s) "
+            "  ON CONFLICT DO NOTHING RETURNING 1"
+            f") UPDATE metricas_campanas SET {columna} = {columna} + (SELECT COUNT(*) FROM ins) "
+            "WHERE tanda_id = %s",
+            (tanda, tel_10, evento, tanda), commit=True
+        )
     except Exception as e:
         print(f"Error en registrar_metrica (evento={evento}, tel={telefono}): {e}")
 
@@ -295,7 +330,11 @@ def revisar_rutinas_de_tiempo():
         if para_borrar:
             for msg_id, telefono in para_borrar:
                 execute_db_query("DELETE FROM mensajes WHERE id=%s", (msg_id,), commit=True)
-        execute_db_query("DELETE FROM asignaciones_v2 WHERE (fecha_asignacion < %s OR fecha_asignacion IS NULL) AND telefono_cliente NOT IN (SELECT telefono FROM chat_sesiones)", (hace_48_horas,), commit=True)
+        # asignaciones_v2.telefono_cliente son 10 digitos (extraer_10_digitos) y
+        # chat_sesiones.telefono es el numero completo (~13 digitos): hay que comparar
+        # ambos lados en 10 digitos (RIGHT(...,10)) o el NOT IN es SIEMPRE verdadero y
+        # se borra la asignacion de clientes con chat activo (perdiendo vendedor y metrica).
+        execute_db_query("DELETE FROM asignaciones_v2 WHERE (fecha_asignacion < %s OR fecha_asignacion IS NULL) AND telefono_cliente NOT IN (SELECT RIGHT(telefono,10) FROM chat_sesiones)", (hace_48_horas,), commit=True)
 
         # Las fotos de los clientes se guardan 90 días y después se borran, para no
         # llenar la base de datos.
@@ -310,7 +349,7 @@ def revisar_rutinas_de_tiempo():
             "SELECT telefono, historial FROM chat_sesiones WHERE COALESCE(derivado,0)=1 AND ultima_interaccion < %s",
             (hace_72h,), fetchall=True) or []
         for telefono, historial_str in cerrar_deriv:
-            _archivar_y_cerrar(telefono, historial_str, avisar_vendedor=False)
+            _archivar_y_cerrar(telefono, historial_str, avisar_vendedor=False, fue_derivado=True)
 
         # B) Sin pase a vendedor, 72h inactivos y aún no re-preguntados: se manda UNA re-pregunta.
         repreguntar = execute_db_query(
@@ -329,22 +368,52 @@ def revisar_rutinas_de_tiempo():
             _archivar_y_cerrar(telefono, historial_str, avisar_vendedor=True)
     except Exception: pass
 
-def _archivar_y_cerrar(telefono, historial_str, avisar_vendedor=True):
+def _archivar_y_cerrar(telefono, historial_str, avisar_vendedor=True, fue_derivado=False):
     """Guarda la conversación en chats_derivados (para el panel) y borra la sesión. No manda
-    mensaje al cliente (la re-pregunta ya avisó que se cerraría)."""
+    mensaje al cliente (la re-pregunta ya avisó que se cerraría). fue_derivado=True marca en
+    el panel que el cliente SÍ recibió el enlace al vendedor (vs. un abandono que solo se cerró
+    por inactividad)."""
     try:
-        res_vend = execute_db_query("SELECT numero_vendedor FROM asignaciones_v2 WHERE telefono_cliente = %s", (extraer_10_digitos(telefono),), fetchone=True)
-        vendedor = res_vend[0] if res_vend else "Sin asignar"
-        try:
-            historial = json.loads(historial_str) if historial_str else []
-        except Exception:
-            historial = []
-        execute_db_query("INSERT INTO chats_derivados (telefono, vendedor, historial, fecha) VALUES (%s, %s, %s, %s) ON CONFLICT (telefono) DO UPDATE SET historial=EXCLUDED.historial, fecha=EXCLUDED.fecha", (telefono, vendedor, json.dumps(historial[2:] if len(historial) >= 2 else historial), hora_arg()), commit=True)
-        if avisar_vendedor:
-            enviar_mensaje_whatsapp(vendedor if vendedor and vendedor != "Sin asignar" else "5491145394279", f"🤖 *Chat cerrado por inactividad (no respondió la re-pregunta).*\nCliente: +{telefono}\nRevisar en panel.")
-        registrar_metrica('derivado', telefono)
-        execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono,), commit=True)
-        execute_db_query("DELETE FROM asignaciones_v2 WHERE telefono_cliente = %s", (extraer_10_digitos(telefono),), commit=True)
+        # Tomamos el lock por-teléfono (RLock) para serializar este archivado contra el del
+        # webhook (reset de 72h) y evitar un read-modify-write pisado sobre chats_derivados.
+        with get_chat_lock(telefono):
+            res_vend = execute_db_query("SELECT numero_vendedor FROM asignaciones_v2 WHERE telefono_cliente = %s", (extraer_10_digitos(telefono),), fetchone=True)
+            vendedor = res_vend[0] if res_vend else "Sin asignar"
+            try:
+                historial = json.loads(historial_str) if historial_str else []
+            except Exception:
+                historial = []
+            nuevo = historial[2:] if len(historial) >= 2 else historial
+            # Si ya había un chat archivado de este teléfono todavía sin resolver, NO lo pisamos:
+            # concatenamos la conversación nueva para no perder la anterior. Pero evitamos DUPLICAR
+            # cuando se archiva dos veces el mismo tramo (carrera scheduler cada 5 min + webhook):
+            # si 'nuevo' ya es la cola de lo guardado, dejamos el historial como está.
+            prev = execute_db_query("SELECT historial FROM chats_derivados WHERE telefono = %s", (telefono,), fetchone=True)
+            prev_hist = []
+            if prev and prev[0]:
+                try:
+                    prev_hist = json.loads(prev[0])
+                except Exception:
+                    prev_hist = []
+            if nuevo and prev_hist[-len(nuevo):] == nuevo:
+                combinado = prev_hist            # este tramo ya estaba archivado -> no re-agregar
+            else:
+                combinado = prev_hist + nuevo
+            # Tope: un cliente recurrente cuyo registro nunca se resuelve no debe inflar el TEXT sin
+            # límite. Guardamos a lo sumo los últimos 40 mensajes.
+            if len(combinado) > 40:
+                combinado = combinado[-40:]
+            # DO UPDATE: 'derivado' queda pegajoso (GREATEST). El vendedor se actualiza SOLO si el
+            # nuevo es real: si este archivado no encontró asignación (NULL/''/'Sin asignar'), NO
+            # pisa el vendedor real que hubiera quedado de un archivado anterior.
+            execute_db_query("INSERT INTO chats_derivados (telefono, vendedor, historial, fecha, derivado) VALUES (%s, %s, %s, %s, %s) ON CONFLICT (telefono) DO UPDATE SET vendedor=CASE WHEN EXCLUDED.vendedor IS NULL OR EXCLUDED.vendedor IN ('', 'Sin asignar') THEN chats_derivados.vendedor ELSE EXCLUDED.vendedor END, historial=EXCLUDED.historial, fecha=EXCLUDED.fecha, derivado=GREATEST(COALESCE(chats_derivados.derivado,0), EXCLUDED.derivado)", (telefono, vendedor, json.dumps(combinado), hora_arg(), 1 if fue_derivado else 0), commit=True)
+            if avisar_vendedor:
+                enviar_mensaje_whatsapp(vendedor if vendedor and vendedor != "Sin asignar" else "5491145394279", f"🤖 *Chat cerrado por inactividad (no respondió la re-pregunta).*\nCliente: +{telefono}\nRevisar en panel.")
+            # NO se llama registrar_metrica('derivado') acá: las derivaciones reales ya se
+            # cuentan en vivo al generar el enlace; hacerlo acá contaba como "derivado" a los
+            # abandonos (Path C) que nunca recibieron enlace.
+            execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono,), commit=True)
+            execute_db_query("DELETE FROM asignaciones_v2 WHERE telefono_cliente = %s", (extraer_10_digitos(telefono),), commit=True)
     except Exception:
         pass
 
@@ -873,15 +942,21 @@ def _texto_de(respuesta):
 
 def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None, img_id=None):
     with get_chat_lock(telefono):
-        if texto_entrante and "reset" in texto_entrante.strip().lower():
+        if texto_entrante and texto_entrante.strip().lower() == "reset":
             execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono,), commit=True)
             enviar_mensaje_whatsapp(telefono, "✅ Memoria borrada. Escribe 'Hola'.")
             return
             
-        res = execute_db_query("SELECT historial, ultima_interaccion FROM chat_sesiones WHERE telefono = %s", (telefono,), fetchone=True)
+        res = execute_db_query("SELECT historial, ultima_interaccion, COALESCE(derivado,0) FROM chat_sesiones WHERE telefono = %s", (telefono,), fetchone=True)
         # La memoria dura 72hs. Recién pasadas las 72hs sin actividad se arranca de cero.
         if res and res[1] and hora_arg() - res[1] > timedelta(hours=72):
-            execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono,), commit=True)
+            # Si la sesión vieja YA estaba derivada, la archivamos en el panel antes de
+            # descartarla; si no, ese chat derivado se perdería sin quedar registrado
+            # (carrera: el cliente vuelve a escribir antes de que el scheduler lo archive).
+            if res[2] == 1:
+                _archivar_y_cerrar(telefono, res[0], avisar_vendedor=False, fue_derivado=True)
+            else:
+                execute_db_query("DELETE FROM chat_sesiones WHERE telefono = %s", (telefono,), commit=True)
             res = None
 
         prompt_din = obtener_prompt_personalizado(telefono, determinar_modo_bot())
@@ -952,11 +1027,13 @@ def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None, img_i
             historial.append({"role": "user", "parts": [txt_historial]})
             historial.append({"role": "model", "parts": [txt_res]})
             
-            # advertido=0: el cliente contestó, ya no está "por cerrarse". derivado=1 si ESTE
-            # mensaje fue el pase a un vendedor (para no re-preguntarle después).
+            # advertido=0: el cliente contestó, ya no está "por cerrarse". derivado se vuelve
+            # 1 cuando ESTE mensaje fue el pase a un vendedor, y una vez en 1 QUEDA en 1
+            # (GREATEST): si después el cliente dice "gracias" y el bot responde sin enlace,
+            # NO se pierde el estado de derivado ni cae en la re-pregunta / falso abandono.
             execute_db_query(
                 "INSERT INTO chat_sesiones (telefono, historial, ultima_interaccion, advertido, derivado) VALUES (%s, %s, %s, 0, %s) "
-                "ON CONFLICT (telefono) DO UPDATE SET historial = EXCLUDED.historial, ultima_interaccion = EXCLUDED.ultima_interaccion, advertido = 0, derivado = EXCLUDED.derivado",
+                "ON CONFLICT (telefono) DO UPDATE SET historial = EXCLUDED.historial, ultima_interaccion = EXCLUDED.ultima_interaccion, advertido = 0, derivado = GREATEST(COALESCE(chat_sesiones.derivado,0), EXCLUDED.derivado)",
                 (telefono, json.dumps(historial), hora_arg(), 1 if link else 0), commit=True)
             historial_guardado = True
             enviar_mensaje_whatsapp(telefono, txt_limpio, link_boton=link)
@@ -1051,14 +1128,19 @@ def obtener_derivados():
     """
     try:
         rows = execute_db_query(
-            "SELECT telefono, vendedor, historial, fecha FROM chats_derivados ORDER BY fecha DESC",
+            "SELECT telefono, vendedor, historial, fecha, COALESCE(derivado,0) FROM chats_derivados ORDER BY fecha DESC",
             fetchall=True
         )
+        # None = error de DB (execute_db_query lo traga y devuelve None); [] = tabla vacía.
+        # Antes se confundían y un fallo de DB parecía "no hay derivados" -> el panel ocultaba
+        # clientes pendientes sin ninguna señal de error.
+        if rows is None:
+            return jsonify({"error": "No se pudo leer la base de datos"}), 500
         if not rows:
             return jsonify([]), 200
 
         resultado = []
-        for telefono, vendedor, historial_str, fecha in rows:
+        for telefono, vendedor, historial_str, fecha, derivado in rows:
             try:
                 historial = json.loads(historial_str) if historial_str else []
             except Exception:
@@ -1067,7 +1149,9 @@ def obtener_derivados():
                 "telefono": telefono,
                 "vendedor": vendedor,
                 "historial": historial,
-                "fecha": str(fecha) if fecha else ""
+                "fecha": str(fecha) if fecha else "",
+                # True = recibió el enlace al vendedor; False = se cerró por inactividad sin derivar.
+                "derivado": bool(derivado)
             })
         return jsonify(resultado), 200
     except Exception as e:
@@ -1104,6 +1188,8 @@ def obtener_metricas():
             "SELECT tanda_id, entregados, leidos, respondidos, derivados FROM metricas_campanas",
             fetchall=True
         )
+        if rows is None:
+            return jsonify({"error": "No se pudo leer la base de datos"}), 500
         if not rows:
             return jsonify({}), 200
 
@@ -1133,6 +1219,8 @@ def obtener_tracking_general():
             "SELECT tanda_id, telefono, evento FROM tracking_metricas ORDER BY tanda_id, telefono",
             fetchall=True
         )
+        if rows is None:
+            return jsonify({"error": "No se pudo leer la base de datos"}), 500
         if not rows:
             return jsonify({}), 200
 
