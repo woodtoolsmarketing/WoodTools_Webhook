@@ -18,8 +18,9 @@ except Exception:
 import json
 import psycopg2 
 from psycopg2 import pool 
-import re 
+import re
 import io
+import csv
 from PIL import Image
 import threading
 from threading import Lock, RLock
@@ -149,6 +150,10 @@ def init_db():
         execute_db_query('''CREATE TABLE IF NOT EXISTS configuracion (parametro TEXT PRIMARY KEY, valor TEXT)''', commit=True)
         # Fotos que mandan los clientes por WhatsApp, para poder verlas después en el panel.
         execute_db_query('''CREATE TABLE IF NOT EXISTS chat_imagenes (id SERIAL PRIMARY KEY, telefono TEXT, imagen BYTEA, imagen_tipo TEXT, fecha TIMESTAMP)''', commit=True)
+        # Registro DURABLE de cada contacto que escribió al bot (para poder exportarlos). Se
+        # llena en cada mensaje entrante y sobrevive al ciclo de vida de las sesiones (que se
+        # borran/archivan). 'telefono' es el número completo, igual que en chat_sesiones.
+        execute_db_query('''CREATE TABLE IF NOT EXISTS contactos (telefono TEXT PRIMARY KEY, primer_contacto TIMESTAMP, ultimo_contacto TIMESTAMP, mensajes INTEGER DEFAULT 0)''', commit=True)
         try: execute_db_query("ALTER TABLE chat_sesiones ADD COLUMN IF NOT EXISTS advertido INTEGER DEFAULT 0", commit=True)
         except Exception: pass
         try: execute_db_query("ALTER TABLE chat_sesiones ADD COLUMN IF NOT EXISTS derivado INTEGER DEFAULT 0", commit=True)
@@ -164,6 +169,17 @@ def init_db():
         try: execute_db_query("INSERT INTO metricas_campanas (tanda_id, entregados, leidos, respondidos, derivados) VALUES ('ORGANICO', 0, 0, 0, 0) ON CONFLICT (tanda_id) DO NOTHING", commit=True)
         except Exception: pass
         try: execute_db_query("INSERT INTO configuracion (parametro, valor) VALUES ('modo_bot', 'AUTO') ON CONFLICT (parametro) DO NOTHING", commit=True)
+        except Exception: pass
+        # Backfill (una sola vez, idempotente): carga en 'contactos' a los que ya están en
+        # chat_sesiones/chats_derivados, para que la exportación no arranque vacía. Ambas usan
+        # el número completo, así que no se mezclan formatos.
+        try: execute_db_query(
+            "INSERT INTO contactos (telefono, primer_contacto, ultimo_contacto, mensajes) "
+            "SELECT telefono, MIN(f), MAX(f), 0 FROM ("
+            "  SELECT telefono, ultima_interaccion AS f FROM chat_sesiones WHERE telefono IS NOT NULL "
+            "  UNION ALL "
+            "  SELECT telefono, fecha AS f FROM chats_derivados WHERE telefono IS NOT NULL"
+            ") u GROUP BY telefono ON CONFLICT (telefono) DO NOTHING", commit=True)
         except Exception: pass
     except Exception as e: pass
 
@@ -321,6 +337,22 @@ def registrar_metrica(evento, telefono):
         )
     except Exception as e:
         print(f"Error en registrar_metrica (evento={evento}, tel={telefono}): {e}")
+
+def registrar_contacto(telefono):
+    """Registra/actualiza al contacto en la tabla durable 'contactos'. Se llama en CADA mensaje
+    entrante: así queda la lista completa de todos los que escribieron al bot, sin importar que
+    después su sesión se archive o se borre. Guarda primer/último contacto y cuenta mensajes."""
+    try:
+        ahora = hora_arg()
+        execute_db_query(
+            "INSERT INTO contactos (telefono, primer_contacto, ultimo_contacto, mensajes) "
+            "VALUES (%s, %s, %s, 1) "
+            "ON CONFLICT (telefono) DO UPDATE SET ultimo_contacto = EXCLUDED.ultimo_contacto, "
+            "mensajes = COALESCE(contactos.mensajes, 0) + 1",
+            (telefono, ahora, ahora), commit=True
+        )
+    except Exception as e:
+        print(f"Error en registrar_contacto (tel={telefono}): {e}")
 
 def revisar_rutinas_de_tiempo():
     try:
@@ -1058,11 +1090,39 @@ def inicio():
     return (f"🚀 Webhook WoodTools + IA Gemini 🚀 | commit:{commit} | "
             f"conocimiento:{VERSION_CONOCIMIENTO}"), 200
 
+PAGINA_WA = """<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WoodTools</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:#f0f2f5;color:#222;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.card{background:#fff;border-radius:18px;box-shadow:0 8px 30px rgba(0,0,0,.12);max-width:420px;width:100%;overflow:hidden;text-align:center}
+.top{background:#a41e22;color:#fff;padding:30px 20px 24px}
+.top .marca{font-size:27px;font-weight:800;letter-spacing:.5px}
+.top .sub{font-size:13px;opacity:.9;margin-top:4px}
+.body{padding:28px 24px 30px}
+.body h1{font-size:21px;margin-bottom:10px}
+.body p{font-size:15px;color:#555;line-height:1.5;margin-bottom:24px}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;background:#25D366;color:#fff;text-decoration:none;font-size:17px;font-weight:700;padding:16px 20px;border-radius:12px}
+.btn:active{transform:scale(.98)}
+.foot{font-size:12px;color:#999;margin-top:18px}
+</style></head>
+<body><div class="card">
+<div class="top"><div class="marca">&#129717; WoodTools</div><div class="sub">Herramientas para tu taller</div></div>
+<div class="body">
+<h1>&iexcl;Gracias por tu inter&eacute;s! &#128075;</h1>
+<p>Tocá el botón y te atendemos por WhatsApp con toda la información que necesites.</p>
+<a class="btn" href="@@CHAT_URL@@">&#128172; Hablar con tu vendedor</a>
+<div class="foot">WoodTools &middot; Respuesta rápida</div>
+</div></div></body></html>"""
+
 @app.route('/wa/<tanda_id>/<telefono_cliente>/<vendedor>', methods=['GET'])
 def redirect_wa(tanda_id, telefono_cliente, vendedor):
     txt = urllib.parse.quote(request.args.get('text', ''))
     vend = "54" + vendedor[3:] if vendedor.startswith("549") and len(vendedor) == 13 else vendedor
-    return f'<script>window.location.replace("whatsapp://send?phone={vend}&text={txt}");setTimeout(()=>window.location.replace("https://wa.me/{vend}?text={txt}"),2000);</script>'
+    chat_url = f"https://wa.me/{vend}?text={txt}"
+    return PAGINA_WA.replace("@@CHAT_URL@@", chat_url), 200
 
 @app.route('/webhook', methods=['GET'])
 def verif():
@@ -1087,8 +1147,9 @@ def recib():
                             processed_msg_ids.clear()
                         
                         tel = limpiar_numero(m['from'])
-                        
-                        # Registramos que el cliente respondió
+
+                        # Registramos el contacto (durable, para exportar) y que respondió.
+                        registrar_contacto(tel)
                         registrar_metrica('responded', tel)
 
                         if m['type'] == 'text': 
@@ -1241,6 +1302,63 @@ def obtener_tracking_general():
     except Exception as e:
         print(f"Error en GET /tracking_general: {e}")
         return jsonify({}), 500
+
+
+@app.route('/contactos', methods=['GET'])
+def obtener_contactos():
+    """
+    Devuelve TODOS los contactos que alguna vez escribieron al bot (tabla durable 'contactos').
+    La app de escritorio (Gestor de Mensajes) lo usa para exportarlos a CSV/Excel.
+    Formato: lista de objetos {telefono, primer_contacto, ultimo_contacto, mensajes}.
+    """
+    try:
+        rows = execute_db_query(
+            "SELECT telefono, primer_contacto, ultimo_contacto, COALESCE(mensajes,0) "
+            "FROM contactos ORDER BY ultimo_contacto DESC NULLS LAST",
+            fetchall=True
+        )
+        if rows is None:
+            return jsonify({"error": "No se pudo leer la base de datos"}), 500
+        resultado = [{
+            "telefono":        tel,
+            "primer_contacto": str(pc) if pc else "",
+            "ultimo_contacto": str(uc) if uc else "",
+            "mensajes":        m or 0,
+        } for tel, pc, uc, m in rows]
+        return jsonify(resultado), 200
+    except Exception as e:
+        print(f"Error en GET /contactos: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/contactos.csv', methods=['GET'])
+def exportar_contactos_csv():
+    """
+    Descarga directa de los contactos como CSV (para abrir en el navegador sin la app de escritorio).
+    """
+    try:
+        rows = execute_db_query(
+            "SELECT telefono, primer_contacto, ultimo_contacto, COALESCE(mensajes,0) "
+            "FROM contactos ORDER BY ultimo_contacto DESC NULLS LAST",
+            fetchall=True
+        )
+        if rows is None:
+            return jsonify({"error": "No se pudo leer la base de datos"}), 500
+        buf = io.StringIO()
+        buf.write('﻿')  # BOM: para que Excel abra bien los acentos
+        w = csv.writer(buf)
+        w.writerow(["Telefono", "Primer contacto", "Ultimo contacto", "Cantidad de mensajes"])
+        for tel, pc, uc, m in (rows or []):
+            w.writerow([tel, str(pc) if pc else "", str(uc) if uc else "", m or 0])
+        fecha = hora_arg().strftime('%Y%m%d')
+        return Response(
+            buf.getvalue(),
+            mimetype='text/csv',
+            headers={"Content-Disposition": f'attachment; filename="contactos_woodtools_{fecha}.csv"'}
+        )
+    except Exception as e:
+        print(f"Error en GET /contactos.csv: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/asignar_vendedor', methods=['POST'])
