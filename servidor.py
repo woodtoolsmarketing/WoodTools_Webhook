@@ -166,6 +166,12 @@ def init_db():
         except Exception: pass
         try: execute_db_query("ALTER TABLE asignaciones_v2 ADD COLUMN IF NOT EXISTS fecha_asignacion TIMESTAMP", commit=True)
         except Exception: pass 
+        # Fallos de envío: cuántos mensajes de cada tanda NO pudo entregar Meta y POR QUÉ
+        # (código de error). Antes el webhook descartaba los estados 'failed' y no había forma
+        # de diagnosticar una campaña que "envió" 1000 pero entregó 300.
+        try: execute_db_query("ALTER TABLE metricas_campanas ADD COLUMN IF NOT EXISTS fallidos INTEGER DEFAULT 0", commit=True)
+        except Exception: pass
+        execute_db_query('''CREATE TABLE IF NOT EXISTS fallos_envio (tanda_id TEXT, telefono TEXT, codigo TEXT, titulo TEXT, fecha TIMESTAMP, PRIMARY KEY (tanda_id, telefono))''', commit=True)
         try: execute_db_query("INSERT INTO metricas_campanas (tanda_id, entregados, leidos, respondidos, derivados) VALUES ('ORGANICO', 0, 0, 0, 0) ON CONFLICT (tanda_id) DO NOTHING", commit=True)
         except Exception: pass
         try: execute_db_query("INSERT INTO configuracion (parametro, valor) VALUES ('modo_bot', 'AUTO') ON CONFLICT (parametro) DO NOTHING", commit=True)
@@ -288,6 +294,7 @@ def registrar_metrica(evento, telefono):
             'read':      'leidos',
             'responded': 'respondidos',
             'derivado':  'derivados',
+            'failed':    'fallidos',
         }
         columna = columna_map.get(evento)
         if not columna:
@@ -337,6 +344,24 @@ def registrar_metrica(evento, telefono):
         )
     except Exception as e:
         print(f"Error en registrar_metrica (evento={evento}, tel={telefono}): {e}")
+
+def registrar_fallo_envio(telefono, codigo, titulo):
+    """Guarda el motivo por el que Meta NO pudo entregar un mensaje (estado 'failed' del
+    webhook), asociado a la tanda del cliente. Así el reporte muestra POR QUÉ falló cada número."""
+    try:
+        tel_10 = extraer_10_digitos(telefono)
+        res = execute_db_query(
+            "SELECT tanda_id FROM asignaciones_v2 WHERE telefono_cliente = %s",
+            (tel_10,), fetchone=True
+        )
+        tanda = res[0] if (res and res[0]) else 'ORGANICO'
+        execute_db_query(
+            "INSERT INTO fallos_envio (tanda_id, telefono, codigo, titulo, fecha) VALUES (%s, %s, %s, %s, %s) "
+            "ON CONFLICT (tanda_id, telefono) DO UPDATE SET codigo = EXCLUDED.codigo, titulo = EXCLUDED.titulo, fecha = EXCLUDED.fecha",
+            (tanda, tel_10, str(codigo or ''), (titulo or '')[:200], hora_arg()), commit=True
+        )
+    except Exception as e:
+        print(f"Error en registrar_fallo_envio (tel={telefono}): {e}")
 
 def registrar_contacto(telefono):
     """Registra/actualiza al contacto en la tabla durable 'contactos'. Se llama en CADA mensaje
@@ -1170,6 +1195,13 @@ def recib():
                         
                         if tipo_estado in ['delivered', 'read']:
                             registrar_metrica(tipo_estado, tel)
+                        elif tipo_estado == 'failed':
+                            # Meta no pudo entregarlo: guardamos el CÓDIGO de error para diagnosticar
+                            # (antes estos estados se descartaban y la campaña parecía "enviada").
+                            errs = estado.get('errors') or []
+                            err = errs[0] if errs else {}
+                            registrar_metrica('failed', tel)
+                            registrar_fallo_envio(tel, err.get('code', ''), err.get('title') or err.get('message') or '')
 
         except Exception as e:
             print(f"Error procesando el webhook: {e}")
@@ -1285,8 +1317,9 @@ def obtener_tracking_general():
         if not rows:
             return jsonify({}), 200
 
-        # Prioridad de eventos para elegir el "mejor" estado si hay varios
-        prioridad = {'derivado': 4, 'responded': 3, 'read': 2, 'delivered': 1}
+        # Prioridad de eventos para elegir el "mejor" estado si hay varios.
+        # 'failed' es el más bajo: solo se muestra si el número nunca llegó a entregarse.
+        prioridad = {'derivado': 4, 'responded': 3, 'read': 2, 'delivered': 1, 'failed': 0.5}
 
         resultado = {}
         for tanda_id, telefono, evento in rows:
@@ -1298,10 +1331,54 @@ def obtener_tracking_general():
             if prioridad.get(evento, 0) > prioridad.get(evento_actual, 0):
                 resultado[tanda_id][tel_10] = evento
 
+        # A los que fallaron les adjuntamos el motivo de Meta: "failed|131026|Message undeliverable"
+        try:
+            fallos = execute_db_query("SELECT tanda_id, telefono, codigo, titulo FROM fallos_envio", fetchall=True) or []
+            for tanda_id, telefono, codigo, titulo in fallos:
+                tel_10 = telefono[-10:] if len(telefono) >= 10 else telefono
+                if resultado.get(tanda_id, {}).get(tel_10) == 'failed':
+                    resultado[tanda_id][tel_10] = f"failed|{codigo or ''}|{titulo or ''}"
+        except Exception as e:
+            print(f"tracking_general: no se pudieron adjuntar motivos de fallo: {e}")
+
         return jsonify(resultado), 200
     except Exception as e:
         print(f"Error en GET /tracking_general: {e}")
         return jsonify({}), 500
+
+
+@app.route('/tanda/<tanda_id>/resumen', methods=['GET'])
+def resumen_tanda(tanda_id):
+    """
+    Diagnóstico de una campaña: cuántos números se intentaron (asignaciones_v2), cuántos tienen
+    algún estado de Meta (entregado/leído/.../fallido, con el motivo) y cuáles quedaron SIN estado.
+    Sirve para entender por qué una campaña "envió" N pero entregó muchos menos.
+    """
+    try:
+        from collections import Counter
+        asig = execute_db_query("SELECT telefono_cliente FROM asignaciones_v2 WHERE tanda_id = %s", (tanda_id,), fetchall=True) or []
+        trk = execute_db_query("SELECT telefono, evento FROM tracking_metricas WHERE tanda_id = %s", (tanda_id,), fetchall=True) or []
+        fallos = execute_db_query("SELECT telefono, codigo, titulo FROM fallos_envio WHERE tanda_id = %s", (tanda_id,), fetchall=True) or []
+        prioridad = {'derivado': 4, 'responded': 3, 'read': 2, 'delivered': 1, 'failed': 0.5}
+        mejor = {}
+        for tel, ev in trk:
+            t10 = tel[-10:] if len(tel) >= 10 else tel
+            if prioridad.get(ev, 0) > prioridad.get(mejor.get(t10), 0):
+                mejor[t10] = ev
+        asignados = [(r[0][-10:] if len(r[0]) >= 10 else r[0]) for r in asig]
+        sin_estado = [t for t in asignados if t not in mejor]
+        return jsonify({
+            "tanda_id": tanda_id,
+            "intentados": len(asignados),
+            "con_estado": len(mejor),
+            "por_estado": dict(Counter(mejor.values())),
+            "motivos_fallo": dict(Counter(f"{c or '?'} - {t or ''}" for _, c, t in fallos)),
+            "sin_estado": len(sin_estado),
+            "telefonos_sin_estado": sin_estado,
+        }), 200
+    except Exception as e:
+        print(f"Error en GET /tanda/{tanda_id}/resumen: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/contactos', methods=['GET'])
