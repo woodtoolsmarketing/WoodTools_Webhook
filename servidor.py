@@ -1381,6 +1381,44 @@ def resumen_tanda(tanda_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/numeros_estado', methods=['GET'])
+def numeros_estado():
+    """
+    Cruce histórico REAL de Meta para toda la cuenta (no una sola tanda). La app de escritorio
+    lo consulta ANTES de enviar para mostrar, de los números cargados, cuáles YA funcionaron y
+    cuáles NO (y así estimar el gasto sin quemar plata en números que no están en WhatsApp).
+    Devuelve:
+      - entregados: lista de últimos-10-dígitos que alguna vez se entregaron o leyeron (funcionan).
+      - fallidos: dict {ultimos_10: {codigo, titulo}} de los que Meta NO pudo entregar (no funcionan).
+        Si un número falló y DESPUÉS se entregó, gana 'entregado' (no aparece como fallido).
+    """
+    try:
+        entregados = execute_db_query(
+            "SELECT DISTINCT telefono FROM tracking_metricas WHERE evento IN ('delivered','read')",
+            fetchall=True
+        ) or []
+        fallos = execute_db_query(
+            "SELECT telefono, codigo, titulo FROM fallos_envio", fetchall=True
+        ) or []
+        set_ok = {r[0] for r in entregados if r and r[0]}
+        fallidos = {}
+        for tel, cod, tit in fallos:
+            if not tel or tel in set_ok:
+                continue
+            # Nos quedamos con el motivo más informativo si el número falló en varias tandas.
+            if tel not in fallidos or (cod and not fallidos[tel].get("codigo")):
+                fallidos[tel] = {"codigo": str(cod or ''), "titulo": (tit or '')[:200]}
+        return jsonify({
+            "entregados": sorted(set_ok),
+            "fallidos": fallidos,
+            "total_entregados": len(set_ok),
+            "total_fallidos": len(fallidos),
+        }), 200
+    except Exception as e:
+        print(f"Error en GET /numeros_estado: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/contactos', methods=['GET'])
 def obtener_contactos():
     """
