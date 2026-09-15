@@ -172,6 +172,9 @@ def init_db():
         try: execute_db_query("ALTER TABLE metricas_campanas ADD COLUMN IF NOT EXISTS fallidos INTEGER DEFAULT 0", commit=True)
         except Exception: pass
         execute_db_query('''CREATE TABLE IF NOT EXISTS fallos_envio (tanda_id TEXT, telefono TEXT, codigo TEXT, titulo TEXT, fecha TIMESTAMP, PRIMARY KEY (tanda_id, telefono))''', commit=True)
+        # Historial durable de contactos que NO se pueden alcanzar (número inválido o no está en
+        # WhatsApp), CON su cliente/código, para contactarlos y pedir el número correcto.
+        execute_db_query('''CREATE TABLE IF NOT EXISTS contactos_invalidos (numero TEXT PRIMARY KEY, codigo_cliente TEXT, cliente TEXT, numero_original TEXT, motivo TEXT, origen TEXT, fecha TIMESTAMP)''', commit=True)
         try: execute_db_query("INSERT INTO metricas_campanas (tanda_id, entregados, leidos, respondidos, derivados) VALUES ('ORGANICO', 0, 0, 0, 0) ON CONFLICT (tanda_id) DO NOTHING", commit=True)
         except Exception: pass
         try: execute_db_query("INSERT INTO configuracion (parametro, valor) VALUES ('modo_bot', 'AUTO') ON CONFLICT (parametro) DO NOTHING", commit=True)
@@ -1416,6 +1419,55 @@ def numeros_estado():
         }), 200
     except Exception as e:
         print(f"Error en GET /numeros_estado: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/contactos_invalidos', methods=['POST'])
+def guardar_contactos_invalidos():
+    """La app manda los contactos cuyo número NO sirve (formato inválido o 'no está en WhatsApp')
+    junto con su cliente/código, para acumular un historial durable y poder contactarlos y pedir
+    el número correcto. Deduplica por número (dígitos del original)."""
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        items = data.get("contactos", []) or []
+        guardados = 0
+        for it in items:
+            numero_original = str(it.get("numero_original") or it.get("numero") or "").strip()
+            numero = ''.join(filter(str.isdigit, numero_original)) or numero_original
+            if not numero:
+                continue
+            execute_db_query(
+                "INSERT INTO contactos_invalidos (numero, codigo_cliente, cliente, numero_original, motivo, origen, fecha) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s) "
+                "ON CONFLICT (numero) DO UPDATE SET codigo_cliente=EXCLUDED.codigo_cliente, cliente=EXCLUDED.cliente, "
+                "numero_original=EXCLUDED.numero_original, motivo=EXCLUDED.motivo, origen=EXCLUDED.origen, fecha=EXCLUDED.fecha",
+                (numero, str(it.get("codigo_cliente") or ""), str(it.get("cliente") or ""),
+                 numero_original, str(it.get("motivo") or "")[:200], str(it.get("origen") or "")[:80], hora_arg()),
+                commit=True
+            )
+            guardados += 1
+        return jsonify({"status": "ok", "guardados": guardados}), 200
+    except Exception as e:
+        print(f"Error en POST /contactos_invalidos: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/contactos_invalidos', methods=['GET'])
+def obtener_contactos_invalidos():
+    """Historial durable de contactos no alcanzables (número inválido o no está en WhatsApp),
+    con su cliente/código, para exportarlo y contactarlos por el número correcto."""
+    try:
+        rows = execute_db_query(
+            "SELECT codigo_cliente, cliente, numero_original, motivo, origen, fecha "
+            "FROM contactos_invalidos ORDER BY fecha DESC NULLS LAST",
+            fetchall=True
+        ) or []
+        return jsonify([{
+            "codigo_cliente": r[0], "cliente": r[1], "numero": r[2],
+            "motivo": r[3], "origen": r[4], "fecha": str(r[5]) if r[5] else ""
+        } for r in rows]), 200
+    except Exception as e:
+        print(f"Error en GET /contactos_invalidos: {e}")
         return jsonify({"error": str(e)}), 500
 
 
