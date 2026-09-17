@@ -164,8 +164,19 @@ def init_db():
         # abandono cerrado por inactividad: ambos viven en chats_derivados.
         try: execute_db_query("ALTER TABLE chats_derivados ADD COLUMN IF NOT EXISTS derivado INTEGER DEFAULT 0", commit=True)
         except Exception: pass
+        # estado del chat pendiente: 'derivado' (recibio enlace), 'abandonado' (chateo y no cerro)
+        # o 'no_respondio' (recibio campaña y nunca escribio). Backfill de las filas viejas segun
+        # el flag 'derivado' que ya existia.
+        try: execute_db_query("ALTER TABLE chats_derivados ADD COLUMN IF NOT EXISTS estado TEXT", commit=True)
+        except Exception: pass
+        try: execute_db_query("UPDATE chats_derivados SET estado = CASE WHEN COALESCE(derivado,0)=1 THEN 'derivado' ELSE 'abandonado' END WHERE estado IS NULL", commit=True)
+        except Exception: pass
         try: execute_db_query("ALTER TABLE asignaciones_v2 ADD COLUMN IF NOT EXISTS fecha_asignacion TIMESTAMP", commit=True)
-        except Exception: pass 
+        except Exception: pass
+        # Número completo (549...) del destinatario de campaña: llega en /asignar_vendedor y antes
+        # se descartaba. Se guarda para poder listar a los no-respondedores en Chats Pendientes.
+        try: execute_db_query("ALTER TABLE asignaciones_v2 ADD COLUMN IF NOT EXISTS telefono_completo TEXT", commit=True)
+        except Exception: pass
         # Fallos de envío: cuántos mensajes de cada tanda NO pudo entregar Meta y POR QUÉ
         # (código de error). Antes el webhook descartaba los estados 'failed' y no había forma
         # de diagnosticar una campaña que "envió" 1000 pero entregó 300.
@@ -390,17 +401,38 @@ def revisar_rutinas_de_tiempo():
         if para_borrar:
             for msg_id, telefono in para_borrar:
                 execute_db_query("DELETE FROM mensajes WHERE id=%s", (msg_id,), commit=True)
-        # asignaciones_v2.telefono_cliente son 10 digitos (extraer_10_digitos) y
-        # chat_sesiones.telefono es el numero completo (~13 digitos): hay que comparar
-        # ambos lados en 10 digitos (RIGHT(...,10)) o el NOT IN es SIEMPRE verdadero y
-        # se borra la asignacion de clientes con chat activo (perdiendo vendedor y metrica).
-        execute_db_query("DELETE FROM asignaciones_v2 WHERE (fecha_asignacion < %s OR fecha_asignacion IS NULL) AND telefono_cliente NOT IN (SELECT RIGHT(telefono,10) FROM chat_sesiones)", (hace_48_horas,), commit=True)
+        hace_72h = ahora - timedelta(hours=72)
+        # NO-RESPONDEDORES: recibieron una campaña, pasaron 72h y NUNCA escribieron. Antes de
+        # borrar su asignación los guardamos en Chats Pendientes marcados 'no_respondio', para que
+        # el vendedor pueda seguirlos. Se excluye a quienes tienen chat activo, ya están archivados
+        # o alguna vez respondieron. El número enviable sale de telefono_completo (guardado en el
+        # envío); si es una asignación vieja que no lo tiene, se reconstruye como '549'+10díg (AR).
+        # Comparamos por últimos 10 dígitos (RIGHT(...,10)) contra tablas cuyo teléfono está en
+        # formato completo; 'contactos' es la señal durable de "alguna vez escribió" (más robusta
+        # que tracking 'responded', que solo cuenta a los asignados y puede fallar). El IS NOT NULL
+        # en cada subconsulta evita que un NULL futuro haga que el NOT IN anule TODA la captura.
+        # No capturamos asignaciones sin fecha (edad desconocida); esas solo se limpian abajo.
+        execute_db_query(
+            "INSERT INTO chats_derivados (telefono, vendedor, historial, fecha, derivado, estado) "
+            "SELECT COALESCE(a.telefono_completo, '549' || a.telefono_cliente), a.numero_vendedor, '[]', %s, 0, 'no_respondio' "
+            "FROM asignaciones_v2 a "
+            "WHERE a.fecha_asignacion < %s "
+            "  AND a.telefono_cliente NOT IN (SELECT RIGHT(telefono,10) FROM chat_sesiones WHERE telefono IS NOT NULL) "
+            "  AND a.telefono_cliente NOT IN (SELECT RIGHT(telefono,10) FROM chats_derivados WHERE telefono IS NOT NULL) "
+            "  AND a.telefono_cliente NOT IN (SELECT RIGHT(telefono,10) FROM contactos WHERE telefono IS NOT NULL) "
+            "  AND a.telefono_cliente NOT IN (SELECT telefono FROM tracking_metricas WHERE evento='responded' AND telefono IS NOT NULL) "
+            "ON CONFLICT (telefono) DO NOTHING",
+            (ahora, hace_72h), commit=True)
+        # Limpieza de asignaciones a las 72h (alineado con la memoria de 72h y con la captura de
+        # arriba). asignaciones_v2.telefono_cliente son 10 digitos y chat_sesiones.telefono es el
+        # numero completo: hay que comparar ambos lados en 10 digitos (RIGHT(...,10)) o el NOT IN
+        # es SIEMPRE verdadero y borra asignaciones de clientes con chat activo.
+        execute_db_query("DELETE FROM asignaciones_v2 WHERE (fecha_asignacion < %s OR fecha_asignacion IS NULL) AND telefono_cliente NOT IN (SELECT RIGHT(telefono,10) FROM chat_sesiones)", (hace_72h,), commit=True)
 
         # Las fotos de los clientes se guardan 90 días y después se borran, para no
         # llenar la base de datos.
         execute_db_query("DELETE FROM chat_imagenes WHERE fecha < %s", (ahora - timedelta(days=90),), commit=True)
         
-        hace_72h = ahora - timedelta(hours=72)
         hace_1h = ahora - timedelta(hours=1)
 
         # A) Último mensaje = pase a un vendedor (derivado=1): a las 72h se archiva y cierra,
@@ -466,7 +498,9 @@ def _archivar_y_cerrar(telefono, historial_str, avisar_vendedor=True, fue_deriva
             # DO UPDATE: 'derivado' queda pegajoso (GREATEST). El vendedor se actualiza SOLO si el
             # nuevo es real: si este archivado no encontró asignación (NULL/''/'Sin asignar'), NO
             # pisa el vendedor real que hubiera quedado de un archivado anterior.
-            execute_db_query("INSERT INTO chats_derivados (telefono, vendedor, historial, fecha, derivado) VALUES (%s, %s, %s, %s, %s) ON CONFLICT (telefono) DO UPDATE SET vendedor=CASE WHEN EXCLUDED.vendedor IS NULL OR EXCLUDED.vendedor IN ('', 'Sin asignar') THEN chats_derivados.vendedor ELSE EXCLUDED.vendedor END, historial=EXCLUDED.historial, fecha=EXCLUDED.fecha, derivado=GREATEST(COALESCE(chats_derivados.derivado,0), EXCLUDED.derivado)", (telefono, vendedor, json.dumps(combinado), hora_arg(), 1 if fue_derivado else 0), commit=True)
+            # estado='derivado' o 'abandonado'. Un chat REAL siempre pisa un 'no_respondio' previo
+            # (si un no-respondedor después escribe, deja de serlo).
+            execute_db_query("INSERT INTO chats_derivados (telefono, vendedor, historial, fecha, derivado, estado) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (telefono) DO UPDATE SET vendedor=CASE WHEN EXCLUDED.vendedor IS NULL OR EXCLUDED.vendedor IN ('', 'Sin asignar') THEN chats_derivados.vendedor ELSE EXCLUDED.vendedor END, historial=EXCLUDED.historial, fecha=EXCLUDED.fecha, derivado=GREATEST(COALESCE(chats_derivados.derivado,0), EXCLUDED.derivado), estado=EXCLUDED.estado", (telefono, vendedor, json.dumps(combinado), hora_arg(), 1 if fue_derivado else 0, 'derivado' if fue_derivado else 'abandonado'), commit=True)
             if avisar_vendedor:
                 enviar_mensaje_whatsapp(vendedor if vendedor and vendedor != "Sin asignar" else "5491145394279", f"🤖 *Chat cerrado por inactividad (no respondió la re-pregunta).*\nCliente: +{telefono}\nRevisar en panel.")
             # NO se llama registrar_metrica('derivado') acá: las derivaciones reales ya se
@@ -1179,6 +1213,12 @@ def recib():
                         # Registramos el contacto (durable, para exportar) y que respondió.
                         registrar_contacto(tel)
                         registrar_metrica('responded', tel)
+                        # Si figuraba como "no respondió" (campaña), ahora SÍ escribió: lo sacamos
+                        # de esa sección al instante. Se compara por los últimos 10 dígitos porque
+                        # el 'from' de Meta puede venir sin el '9' y el no_respondio se guardó con él.
+                        execute_db_query(
+                            "DELETE FROM chats_derivados WHERE estado='no_respondio' AND RIGHT(telefono,10)=RIGHT(%s,10)",
+                            (tel,), commit=True)
 
                         if m['type'] == 'text': 
                             threading.Thread(target=procesar_mensaje_con_gemini, args=(tel, m['text']['body'])).start()
@@ -1224,7 +1264,7 @@ def obtener_derivados():
     """
     try:
         rows = execute_db_query(
-            "SELECT telefono, vendedor, historial, fecha, COALESCE(derivado,0) FROM chats_derivados ORDER BY fecha DESC",
+            "SELECT telefono, vendedor, historial, fecha, COALESCE(derivado,0), COALESCE(estado,'') FROM chats_derivados ORDER BY fecha DESC",
             fetchall=True
         )
         # None = error de DB (execute_db_query lo traga y devuelve None); [] = tabla vacía.
@@ -1236,7 +1276,7 @@ def obtener_derivados():
             return jsonify([]), 200
 
         resultado = []
-        for telefono, vendedor, historial_str, fecha, derivado in rows:
+        for telefono, vendedor, historial_str, fecha, derivado, estado in rows:
             try:
                 historial = json.loads(historial_str) if historial_str else []
             except Exception:
@@ -1247,7 +1287,9 @@ def obtener_derivados():
                 "historial": historial,
                 "fecha": str(fecha) if fecha else "",
                 # True = recibió el enlace al vendedor; False = se cerró por inactividad sin derivar.
-                "derivado": bool(derivado)
+                "derivado": bool(derivado),
+                # 'derivado' | 'abandonado' | 'no_respondio' (recibió campaña y nunca escribió).
+                "estado": estado or ("derivado" if derivado else "abandonado")
             })
         return jsonify(resultado), 200
     except Exception as e:
@@ -1552,16 +1594,17 @@ def asignar_vendedor():
 
         execute_db_query(
             """
-            INSERT INTO asignaciones_v2 (telefono_cliente, numero_vendedor, tipo_campana, subtipo, tanda_id, fecha_asignacion)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO asignaciones_v2 (telefono_cliente, numero_vendedor, tipo_campana, subtipo, tanda_id, fecha_asignacion, telefono_completo)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (telefono_cliente) DO UPDATE
                 SET numero_vendedor  = EXCLUDED.numero_vendedor,
                     tipo_campana     = EXCLUDED.tipo_campana,
                     subtipo          = EXCLUDED.subtipo,
                     tanda_id         = EXCLUDED.tanda_id,
-                    fecha_asignacion = EXCLUDED.fecha_asignacion
+                    fecha_asignacion = EXCLUDED.fecha_asignacion,
+                    telefono_completo = EXCLUDED.telefono_completo
             """,
-            (tel_10, vendedor_tel, tipo_campana, subtipo, tanda_id, hora_arg()),
+            (tel_10, vendedor_tel, tipo_campana, subtipo, tanda_id, hora_arg(), cliente_tel),
             commit=True
         )
 
