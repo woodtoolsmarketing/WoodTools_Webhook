@@ -460,6 +460,21 @@ def revisar_rutinas_de_tiempo():
             _archivar_y_cerrar(telefono, historial_str, avisar_vendedor=True)
     except Exception: pass
 
+def _merge_historial(prev_hist, nuevo):
+    """Combina el historial ya guardado en chats_derivados con el tramo 'nuevo', sin duplicar:
+    - prev vacío -> nuevo.
+    - 'nuevo' ya es la COLA de prev (mismo tramo re-archivado / carrera scheduler+webhook) -> prev.
+    - prev es el COMIENZO de 'nuevo' (la MISMA conversación creció; ej. entry en vivo al derivar
+      y después el archivado con más mensajes) -> nuevo (reemplaza, no duplica).
+    - si no, son conversaciones distintas -> se concatenan."""
+    if not prev_hist:
+        return nuevo
+    if nuevo and prev_hist[-len(nuevo):] == nuevo:
+        return prev_hist
+    if nuevo[:len(prev_hist)] == prev_hist:
+        return nuevo
+    return prev_hist + nuevo
+
 def _archivar_y_cerrar(telefono, historial_str, avisar_vendedor=True, fue_derivado=False):
     """Guarda la conversación en chats_derivados (para el panel) y borra la sesión. No manda
     mensaje al cliente (la re-pregunta ya avisó que se cerraría). fue_derivado=True marca en
@@ -487,10 +502,7 @@ def _archivar_y_cerrar(telefono, historial_str, avisar_vendedor=True, fue_deriva
                     prev_hist = json.loads(prev[0])
                 except Exception:
                     prev_hist = []
-            if nuevo and prev_hist[-len(nuevo):] == nuevo:
-                combinado = prev_hist            # este tramo ya estaba archivado -> no re-agregar
-            else:
-                combinado = prev_hist + nuevo
+            combinado = _merge_historial(prev_hist, nuevo)
             # Tope: un cliente recurrente cuyo registro nunca se resuelve no debe inflar el TEXT sin
             # límite. Guardamos a lo sumo los últimos 40 mensajes.
             if len(combinado) > 40:
@@ -510,6 +522,37 @@ def _archivar_y_cerrar(telefono, historial_str, avisar_vendedor=True, fue_deriva
             execute_db_query("DELETE FROM asignaciones_v2 WHERE telefono_cliente = %s", (extraer_10_digitos(telefono),), commit=True)
     except Exception:
         pass
+
+def registrar_derivado_en_panel(telefono, historial):
+    """Cuando el bot deriva a alguien (genera el link al vendedor), lo mete YA en Chats Pendientes
+    marcado 'derivado', con su número e historial, para que el vendedor lo vea al instante (antes
+    solo aparecía al archivarse a las 72h). NO cierra la sesión: el cliente sigue chateando y, si
+    después se archiva, _archivar_y_cerrar actualiza esta misma fila (sin duplicar, ver _merge_historial)."""
+    try:
+        with get_chat_lock(telefono):
+            res_vend = execute_db_query("SELECT numero_vendedor FROM asignaciones_v2 WHERE telefono_cliente = %s", (extraer_10_digitos(telefono),), fetchone=True)
+            vendedor = res_vend[0] if res_vend else "Sin asignar"
+            nuevo = historial[2:] if len(historial) >= 2 else historial
+            prev = execute_db_query("SELECT historial FROM chats_derivados WHERE telefono = %s", (telefono,), fetchone=True)
+            prev_hist = []
+            if prev and prev[0]:
+                try:
+                    prev_hist = json.loads(prev[0])
+                except Exception:
+                    prev_hist = []
+            combinado = _merge_historial(prev_hist, nuevo)
+            if len(combinado) > 40:
+                combinado = combinado[-40:]
+            # estado='derivado' pisa un 'abandonado'/'no_respondio' previo (ahora SÍ fue derivado).
+            execute_db_query(
+                "INSERT INTO chats_derivados (telefono, vendedor, historial, fecha, derivado, estado) "
+                "VALUES (%s, %s, %s, %s, 1, 'derivado') "
+                "ON CONFLICT (telefono) DO UPDATE SET "
+                "vendedor=CASE WHEN EXCLUDED.vendedor IS NULL OR EXCLUDED.vendedor IN ('', 'Sin asignar') THEN chats_derivados.vendedor ELSE EXCLUDED.vendedor END, "
+                "historial=EXCLUDED.historial, fecha=EXCLUDED.fecha, derivado=1, estado='derivado'",
+                (telefono, vendedor, json.dumps(combinado), hora_arg()), commit=True)
+    except Exception as e:
+        print(f"Error en registrar_derivado_en_panel (tel={telefono}): {e}")
 
 scheduler = BackgroundScheduler()
 scheduler.add_job(func=revisar_rutinas_de_tiempo, trigger="interval", minutes=5)
@@ -1131,6 +1174,12 @@ def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None, img_i
                 (telefono, json.dumps(historial), hora_arg(), 1 if link else 0), commit=True)
             historial_guardado = True
             enviar_mensaje_whatsapp(telefono, txt_limpio, link_boton=link)
+            if link:
+                # Lo dejamos visible en Chats Pendientes (estado 'derivado') para que el vendedor
+                # vea su número al instante, sin esperar a que se archive por inactividad a las 72h.
+                # Va DESPUÉS del envío para no sumarle latencia a la respuesta al cliente; si el
+                # envío llegara a fallar, el archivado de 72h igual lo captura (derivado=1).
+                registrar_derivado_en_panel(telefono, historial)
         except Exception as e:
             # Si el marcador nunca llegó al historial, la foto guardada quedaría huérfana
             # ocupando lugar: se borra. Si el historial YA se guardó (falló solo el envío),
