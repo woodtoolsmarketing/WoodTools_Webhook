@@ -27,6 +27,7 @@ from threading import Lock, RLock
 from apscheduler.schedulers.background import BackgroundScheduler
 import unicodedata
 import time
+import publicidad          # registro de consultas que entran por publicidad (Click-to-WhatsApp)
 
 app = Flask(__name__)
 
@@ -1262,6 +1263,10 @@ def recib():
                         # Registramos el contacto (durable, para exportar) y que respondió.
                         registrar_contacto(tel)
                         registrar_metrica('responded', tel)
+                        # Si el mensaje entró por publicidad (frase objetivo o click en anuncio),
+                        # lo contamos aparte para el panel de consultas por publicidad. Se pasa el
+                        # mensaje crudo 'm' porque ahí viene el objeto 'referral' del anuncio.
+                        publicidad.registrar_consulta(m, tel)
                         # Si figuraba como "no respondió" (campaña), ahora SÍ escribió: lo sacamos
                         # de esa sección al instante. Se compara por los últimos 10 dígitos porque
                         # el 'from' de Meta puede venir sin el '9' y el no_respondio se guardó con él.
@@ -1859,6 +1864,14 @@ def identificar_corte():
         return jsonify({"resultado": identificar_fresa_visual(img)}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ==========================================================================================
+# CONSULTAS POR PUBLICIDAD
+# Enciende el módulo publicidad.py: crea su tabla y registra sus endpoints/panel. Se hace acá
+# abajo, con todo (app, helpers y VERSION_CONOCIMIENTO) ya definido.
+# ==========================================================================================
+publicidad.configurar(app, execute_db_query, hora_arg, limpiar_numero, VERSION_CONOCIMIENTO)
 
 
 if __name__ == '__main__': app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
