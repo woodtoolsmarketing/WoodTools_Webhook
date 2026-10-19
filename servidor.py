@@ -342,6 +342,18 @@ def registrar_metrica(evento, telefono):
             if ya:
                 return
             tanda = 'ORGANICO'
+        elif evento in ('delivered', 'read', 'failed'):
+            # La asignación pudo haberse borrado (cron de 72h) ANTES de que llegue un estado
+            # tardío: las confirmaciones de LECTURA de WhatsApp pueden llegar días después de
+            # enviado. Antes eso se tiraba en silencio (-> 'leidos'/'entregados' subcontados).
+            # Recuperamos la tanda de un evento previo del mismo número en tracking (no se purga).
+            r2 = execute_db_query(
+                "SELECT tanda_id FROM tracking_metricas WHERE telefono = %s AND tanda_id <> 'ORGANICO' LIMIT 1",
+                (tel_10,), fetchone=True
+            )
+            if not (r2 and r2[0]):
+                return
+            tanda = r2[0]
         else:
             return
 
@@ -1247,37 +1259,66 @@ def verif():
     if request.args.get('hub.mode') == 'subscribe' and request.args.get('hub.verify_token') == TOKEN_DE_VERIFICACION: return request.args.get('hub.challenge'), 200
     return 'Error', 400
 
+def _id_ya_procesado(mid):
+    """Check-then-add ATÓMICO del dedup de mensajes entrantes. Sin el lock, dos webhooks
+    concurrentes con el mismo id podían pasar ambos el 'in' antes del add y el bot respondía dos
+    veces. clear() total al pasar 1000 (simple; suficiente para este volumen)."""
+    with locks_lock:
+        if mid in processed_msg_ids:
+            return True
+        processed_msg_ids.add(mid)
+        if len(processed_msg_ids) > 1000:
+            processed_msg_ids.clear()
+        return False
+
+def _procesar_statuses(statuses):
+    """Procesa el LOTE de estados (delivered/read/failed) de un webhook. Cada estado va en su
+    propio try para que uno malformado no corte el resto del lote."""
+    for estado in statuses or []:
+        try:
+            tel = limpiar_numero(estado.get('recipient_id', ''))
+            if not tel:
+                continue
+            tipo_estado = estado.get('status')  # 'sent' | 'delivered' | 'read' | 'failed'
+            if tipo_estado in ('delivered', 'read'):
+                registrar_metrica(tipo_estado, tel)
+            elif tipo_estado == 'failed':
+                # Meta no pudo entregarlo: guardamos el CÓDIGO de error para diagnosticar.
+                errs = estado.get('errors') or []
+                err = errs[0] if errs else {}
+                registrar_metrica('failed', tel)
+                registrar_fallo_envio(tel, err.get('code', ''), err.get('title') or err.get('message') or '')
+        except Exception as e:
+            print(f"[statuses] error en un estado: {e}", flush=True)
+
 @app.route('/webhook', methods=['POST'])
 def recib():
-    cuerpo = request.get_json()
-    if cuerpo:
-        try:
-            for entry in cuerpo['entry']:
-                for change in entry['changes']:
-                    
-                    valor = change.get('value', {})
+    cuerpo = request.get_json(silent=True)
+    if not cuerpo:
+        return jsonify({"status": "ok"}), 200
+    try:
+        for entry in cuerpo.get('entry', []):
+            for change in entry.get('changes', []):
+                valor = change.get('value', {})
 
-                    # 1. MENSAJES ENTRANTES. Meta puede mandar VARIOS en un mismo lote: hay que
-                    #    recorrerlos TODOS (antes se tomaba solo [0] y se perdían los demás).
-                    for m in valor.get('messages', []):
-                        if m.get('id') in processed_msg_ids:
-                            continue   # ya procesado: saltar ESTE, NO abortar el resto del lote
-                        processed_msg_ids.add(m.get('id'))
-                        if len(processed_msg_ids) > 1000:
-                            processed_msg_ids.clear()
-
-                        tel = limpiar_numero(m['from'])
-
+                # 1. MENSAJES ENTRANTES. Meta puede mandar VARIOS en un mismo lote: recorrerlos
+                #    TODOS (antes se tomaba solo [0] y se perdían los demás). Cada uno en su propio
+                #    try para que un mensaje malformado no corte el resto del lote.
+                for m in valor.get('messages', []):
+                    try:
+                        if _id_ya_procesado(m.get('id')):
+                            continue
+                        tel = limpiar_numero(m.get('from', ''))
+                        if not tel:
+                            continue
                         # Registramos el contacto (durable, para exportar) y que respondió.
                         registrar_contacto(tel)
                         registrar_metrica('responded', tel)
-                        # Si figuraba como "no respondió" (campaña), ahora SÍ escribió: lo sacamos
-                        # de esa sección al instante. Se compara por los últimos 10 dígitos porque
-                        # el 'from' de Meta puede venir sin el '9' y el no_respondio se guardó con él.
+                        # Si figuraba como "no respondió" (campaña), ahora SÍ escribió: lo sacamos de
+                        # esa sección al instante (comparando por los últimos 10 dígitos, robusto al '9').
                         execute_db_query(
                             "DELETE FROM chats_derivados WHERE estado='no_respondio' AND RIGHT(telefono,10)=RIGHT(%s,10)",
                             (tel,), commit=True)
-
                         if m.get('type') == 'text':
                             threading.Thread(target=procesar_mensaje_con_gemini, args=(tel, m['text']['body'])).start()
                         elif m.get('type') == 'image':
@@ -1287,29 +1328,18 @@ def recib():
                                 img_id = guardar_imagen_chat(tel, contenido, mime, pil)
                                 procesar_mensaje_con_gemini(tel, caption, pil, img_id)
                             threading.Thread(target=_procesar_imagen).start()
+                    except Exception as e:
+                        print(f"[messages] error en un mensaje: {e}", flush=True)
 
-                    # 2. ESTADOS (sent/delivered/read/failed). Meta los manda EN LOTE: recorrer
-                    #    TODOS (antes se tomaba solo [0], por eso se registraban demasiado pocas
-                    #    lecturas y entregas — el síntoma de "no toma los webhooks de lectura").
-                    for estado in valor.get('statuses', []):
-                        tel = limpiar_numero(estado.get('recipient_id', ''))
-                        if not tel:
-                            continue
-                        tipo_estado = estado.get('status')  # 'sent' | 'delivered' | 'read' | 'failed'
-                        if tipo_estado in ('delivered', 'read'):
-                            registrar_metrica(tipo_estado, tel)
-                        elif tipo_estado == 'failed':
-                            # Meta no pudo entregarlo: guardamos el CÓDIGO de error para diagnosticar
-                            # (antes estos estados se descartaban y la campaña parecía "enviada").
-                            errs = estado.get('errors') or []
-                            err = errs[0] if errs else {}
-                            registrar_metrica('failed', tel)
-                            registrar_fallo_envio(tel, err.get('code', ''), err.get('title') or err.get('message') or '')
+                # 2. ESTADOS (sent/delivered/read/failed). Meta los manda EN LOTE: se procesan
+                #    TODOS (antes solo [0]). Sincrónico a propósito: registrar cada estado de forma
+                #    confiable importa más que la latencia (el problema reportado es subconteo; un
+                #    thread que muera perdería estados en silencio). Si algún día los lotes son
+                #    enormes y Meta hace timeout, la mejora es agrupar los writes, no threadear.
+                _procesar_statuses(valor.get('statuses', []))
+    except Exception as e:
+        print(f"Error procesando el webhook: {e}", flush=True)
 
-        except Exception as e:
-            print(f"Error procesando el webhook: {e}")
-            pass
-            
     return jsonify({"status": "ok"}), 200
 
 # ==========================================
