@@ -112,12 +112,12 @@ def estado_horario():
     ahora = hora_arg()
     return "abierto" if (ahora.weekday() <= 4 and 8 <= ahora.hour < 17) else "cerrado"
 
-def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=False, retries=1):
+def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=False, retries=2):
     if not db_pool: return None
     for attempt in range(retries + 1):
         conn = None
         try:
-            conn = db_pool.getconn() 
+            conn = db_pool.getconn()
             res = None
             with conn.cursor() as c:
                 c.execute(query, params)
@@ -127,16 +127,23 @@ def execute_db_query(query, params=(), commit=False, fetchone=False, fetchall=Fa
                 else: res = c.rowcount
             db_pool.putconn(conn)
             return res
-        except (psycopg2.OperationalError, psycopg2.InterfaceError):
-            if conn: db_pool.putconn(conn, close=True)
-            if attempt == retries: return None
         except Exception as e:
-            # Se loguea: antes cualquier error SQL devolvia None en silencio y el bot
-            # lo interpretaba como "no hay producto" y se lo decia al cliente.
-            print(f"[execute_db_query] {type(e).__name__}: {e} | SQL: {query[:160]}", flush=True)
+            # SIEMPRE descartamos la conexión en mal estado (close=True) para que el pool no
+            # siga reusando conexiones muertas. Esto era el bug: cuando la base se reiniciaba,
+            # el pool quedaba con conexiones rotas y TODA consulta fallaba hasta un redeploy manual.
             if conn:
-                conn.rollback()
-                db_pool.putconn(conn)
+                try: conn.rollback()
+                except Exception: pass
+                try: db_pool.putconn(conn, close=True)
+                except Exception: pass
+            # Reintentamos solo si parece un problema de CONEXIÓN (base reiniciada / conexión muerta),
+            # no ante un error de SQL real (ahí reintentar no sirve).
+            es_conexion = isinstance(e, (psycopg2.OperationalError, psycopg2.InterfaceError)) or \
+                          any(s in str(e).lower() for s in ("connection", "server closed", "ssl", "eof"))
+            if es_conexion and attempt < retries:
+                time.sleep(0.4 * (attempt + 1))
+                continue
+            print(f"[execute_db_query] {type(e).__name__}: {e} | SQL: {query[:160]}", flush=True)
             return None
 
 def init_db():
@@ -1248,15 +1255,17 @@ def recib():
             for entry in cuerpo['entry']:
                 for change in entry['changes']:
                     
-                    # 1. MANEJAR MENSAJES ENTRANTES
-                    if 'messages' in change['value']:
-                        m = change['value']['messages'][0]
-                        if m.get('id') in processed_msg_ids: 
-                            return jsonify({"status": "ok"}), 200
+                    valor = change.get('value', {})
+
+                    # 1. MENSAJES ENTRANTES. Meta puede mandar VARIOS en un mismo lote: hay que
+                    #    recorrerlos TODOS (antes se tomaba solo [0] y se perdían los demás).
+                    for m in valor.get('messages', []):
+                        if m.get('id') in processed_msg_ids:
+                            continue   # ya procesado: saltar ESTE, NO abortar el resto del lote
                         processed_msg_ids.add(m.get('id'))
-                        if len(processed_msg_ids) > 1000: 
+                        if len(processed_msg_ids) > 1000:
                             processed_msg_ids.clear()
-                        
+
                         tel = limpiar_numero(m['from'])
 
                         # Registramos el contacto (durable, para exportar) y que respondió.
@@ -1269,23 +1278,25 @@ def recib():
                             "DELETE FROM chats_derivados WHERE estado='no_respondio' AND RIGHT(telefono,10)=RIGHT(%s,10)",
                             (tel,), commit=True)
 
-                        if m['type'] == 'text': 
+                        if m.get('type') == 'text':
                             threading.Thread(target=procesar_mensaje_con_gemini, args=(tel, m['text']['body'])).start()
-                        elif m['type'] == 'image':
+                        elif m.get('type') == 'image':
                             def _procesar_imagen(tel=tel, media_id=m['image']['id'], caption=m['image'].get('caption', '')):
                                 pil, contenido, mime = descargar_imagen_whatsapp(media_id)
                                 # Guardamos la foto para que el vendedor pueda verla en el panel
                                 img_id = guardar_imagen_chat(tel, contenido, mime, pil)
                                 procesar_mensaje_con_gemini(tel, caption, pil, img_id)
                             threading.Thread(target=_procesar_imagen).start()
-                    
-                    # 2. MANEJAR ESTADOS DE LECTURA Y ENTREGA
-                    elif 'statuses' in change['value']:
-                        estado = change['value']['statuses'][0]
-                        tel = limpiar_numero(estado['recipient_id'])
-                        tipo_estado = estado['status']  # Puede ser 'sent', 'delivered', 'read'
-                        
-                        if tipo_estado in ['delivered', 'read']:
+
+                    # 2. ESTADOS (sent/delivered/read/failed). Meta los manda EN LOTE: recorrer
+                    #    TODOS (antes se tomaba solo [0], por eso se registraban demasiado pocas
+                    #    lecturas y entregas — el síntoma de "no toma los webhooks de lectura").
+                    for estado in valor.get('statuses', []):
+                        tel = limpiar_numero(estado.get('recipient_id', ''))
+                        if not tel:
+                            continue
+                        tipo_estado = estado.get('status')  # 'sent' | 'delivered' | 'read' | 'failed'
+                        if tipo_estado in ('delivered', 'read'):
                             registrar_metrica(tipo_estado, tel)
                         elif tipo_estado == 'failed':
                             # Meta no pudo entregarlo: guardamos el CÓDIGO de error para diagnosticar
