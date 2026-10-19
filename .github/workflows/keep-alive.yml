@@ -1,0 +1,34 @@
+# Keep-alive: mantiene despierto el servicio de Render (free-tier duerme tras ~15 min sin
+# tráfico y, dormido, PIERDE los webhooks de WhatsApp que llegan mientras arranca en frío).
+#
+# Corre en la infra de GitHub (EXTERNA a Render) porque un self-ping desde el propio servidor
+# no sirve: cuando Render lo duerme, suspende el proceso entero (incluido el scheduler), así
+# que no puede pingearse solo. El ping tiene que venir de afuera.
+#
+# Nota: el cron de GitHub Actions NO es puntual (puede atrasarse varios minutos o, con mucha
+# carga, saltear una corrida). Reduce mucho el tiempo dormido, pero no lo elimina 100%. Para
+# algo más confiable, usar además un monitor dedicado (cron-job.org / UptimeRobot) cada 5 min,
+# o —lo robusto de verdad— pasar el servicio a un plan de Render que no duerma.
+
+name: keep-alive
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # cada 10 minutos (hora UTC; GitHub puede atrasarlo)
+  workflow_dispatch:          # permite dispararlo a mano desde la pestaña Actions
+
+# Si una corrida se solapa con la anterior, cancelamos la vieja (no necesitamos acumular pings).
+concurrency:
+  group: keep-alive
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping al webhook de WoodTools
+        run: |
+          echo "Pingeando $(date -u) ..."
+          # -f: falla si el HTTP status es >=400 ; --max-time: no colgarse esperando el cold start.
+          # '|| true': que un ping fallido no marque el workflow en rojo (el próximo reintenta).
+          curl -fsS --max-time 60 https://woodtools-webhook.onrender.com/ || true
