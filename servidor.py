@@ -542,15 +542,20 @@ def _archivar_y_cerrar(telefono, historial_str, avisar_vendedor=True, fue_deriva
     except Exception:
         pass
 
-def registrar_derivado_en_panel(telefono, historial):
+def registrar_derivado_en_panel(telefono, historial, vendedor_tel=None):
     """Cuando el bot deriva a alguien (genera el link al vendedor), lo mete YA en Chats Pendientes
     marcado 'derivado', con su número e historial, para que el vendedor lo vea al instante (antes
     solo aparecía al archivarse a las 72h). NO cierra la sesión: el cliente sigue chateando y, si
-    después se archiva, _archivar_y_cerrar actualiza esta misma fila (sin duplicar, ver _merge_historial)."""
+    después se archiva, _archivar_y_cerrar actualiza esta misma fila (sin duplicar, ver _merge_historial).
+    vendedor_tel = el vendedor REAL del enlace que se mandó (random/asignado/pedido por el cliente):
+    así el panel muestra ese vendedor y no 'Sin asignar'."""
     try:
         with get_chat_lock(telefono):
-            res_vend = execute_db_query("SELECT numero_vendedor FROM asignaciones_v2 WHERE telefono_cliente = %s", (extraer_10_digitos(telefono),), fetchone=True)
-            vendedor = res_vend[0] if res_vend else "Sin asignar"
+            if vendedor_tel:
+                vendedor = vendedor_tel
+            else:
+                res_vend = execute_db_query("SELECT numero_vendedor FROM asignaciones_v2 WHERE telefono_cliente = %s", (extraer_10_digitos(telefono),), fetchone=True)
+                vendedor = res_vend[0] if res_vend else "Sin asignar"
             nuevo = historial[2:] if len(historial) >= 2 else historial
             prev = execute_db_query("SELECT historial FROM chats_derivados WHERE telefono = %s", (telefono,), fetchone=True)
             prev_hist = []
@@ -947,8 +952,17 @@ def obtener_prompt_personalizado(telefono, modo_bot):
     vend_db = res[0] if res else None
     
     mapa = {"5491145394279": "Valentín", "5491157528428": "Emmanuel", "5491134811771": "Ariel", "5491165630406": "Carlos"}
-    # El NOMBRE y el ENLACE apuntan SIEMPRE al mismo vendedor (sin asignar -> Valentín).
-    tel_vend = vend_db if vend_db in mapa else "5491145394279"
+    # Si el cliente YA tiene vendedor asignado (campaña), ese. Si NO (orgánico / le da igual), se
+    # elige uno random pero ESTABLE por teléfono: mismo cliente -> siempre el mismo vendedor (para
+    # no cambiarlo a mitad de conversación), repartido parejo entre los 4. NO default Valentín.
+    vends = list(mapa.keys())
+    if vend_db in mapa:
+        tel_vend = vend_db
+    else:
+        try:
+            tel_vend = vends[int(t_10) % len(vends)]
+        except Exception:
+            tel_vend = vends[0]
     nombre_vend = mapa[tel_vend]
 
     def _enlace(tv):
@@ -966,11 +980,15 @@ def obtener_prompt_personalizado(telefono, modo_bot):
         "MODO BÁSICO:" if modo_bot == "BASICO" else "MODO INTELIGENTE:",
         "- Respuestas ultra cortas, naturales y amigables." if modo_bot == "BASICO" else "- Arma carrito de compras con respuestas naturales y breves.",
         "- NO repitas saludos en cada mensaje.",
-        "- Pregunta si quiere algo más antes de cerrar. Si dice no, genera el enlace.",
-        "VENDEDOR (no te equivoques: el nombre que digas = el vendedor del enlace que mandás):",
-        f"- Por defecto es {nombre_vend}: usá SU enlace y, si lo nombrás, decí ese nombre.",
-        "- Si el cliente pide EXPRESAMENTE otro vendedor por nombre, usá el enlace de ESE vendedor de la lista y nombralo a él.",
-        "- NUNCA menciones un vendedor distinto al del enlace que enviás.",
+        "- Preguntá si quiere algo más antes de cerrar. Cuando no quiere nada más, ofrecé pasarlo "
+        f"con {nombre_vend} y preguntá si lo paso con él. NO mandes el enlace todavía.",
+        "DERIVACIÓN (el nombre que digas = el vendedor del enlace que mandás):",
+        f"- El vendedor es {nombre_vend}. Si el cliente pide EXPRESAMENTE otro por nombre, usá el "
+        f"enlace de ESE de la lista y nombralo; si al cliente le da igual, usá {nombre_vend}.",
+        "- Generá el enlace al vendedor SOLO cuando el cliente CONFIRMA que lo pases (dice 'sí', "
+        "'dale', 'pasame', confirma el vendedor). Antes de esa confirmación NO mandes el enlace.",
+        "- Al pasarlo, incluí SIEMPRE el enlace completo y nombrá al MISMO vendedor del enlace; "
+        "nunca nombres uno distinto al del enlace que enviás.",
         "- En el enlace, reemplazá SIEMPRE [Prod] por el producto con sus medidas (ej '-%20Sierra%20Melamina%20D=300mm%20Z=96'). Si son varios, uno por linea separados por %0A-%20. JAMAS mandes el enlace con el texto [Prod] adentro.",
         "ENLACES POR VENDEDOR:",
         vendedores_links,
@@ -1172,10 +1190,19 @@ def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None, img_i
             
             txt_limpio = re.sub(r'\[AGENDADO:\s*.*?\]', '', txt_res, flags=re.IGNORECASE).strip()
             link = None
+            vend_link = None
             if match:
                 raw_url = match.group(1).rstrip('.",\'')
                 txt_limpio = txt_limpio.replace(raw_url, "").replace("👉", "").strip()
                 link = urllib.parse.quote(''.join((c for c in urllib.parse.unquote(raw_url) if unicodedata.category(c) != 'Mn')), safe=':/?&=%')
+
+                # Vendedor REAL al que se pasa el cliente = 3er segmento de /wa/{tanda}/{tel}/{vendedor}.
+                # Se usa para que el panel muestre ESE vendedor (no 'Sin asignar') al registrar la derivación.
+                try:
+                    partes = urllib.parse.urlparse(raw_url).path.split('/')
+                    vend_link = partes[4] if len(partes) >= 5 else None
+                except Exception:
+                    vend_link = None
 
                 # Registrar derivación como métrica cuando se genera el enlace al vendedor
                 registrar_metrica('derivado', telefono)
@@ -1198,7 +1225,7 @@ def procesar_mensaje_con_gemini(telefono, texto_entrante, imagen_pil=None, img_i
                 # vea su número al instante, sin esperar a que se archive por inactividad a las 72h.
                 # Va DESPUÉS del envío para no sumarle latencia a la respuesta al cliente; si el
                 # envío llegara a fallar, el archivado de 72h igual lo captura (derivado=1).
-                registrar_derivado_en_panel(telefono, historial)
+                registrar_derivado_en_panel(telefono, historial, vend_link)
         except Exception as e:
             # Si el marcador nunca llegó al historial, la foto guardada quedaría huérfana
             # ocupando lugar: se borra. Si el historial YA se guardó (falló solo el envío),
